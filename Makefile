@@ -1,9 +1,11 @@
 #---------------------------------------------------------------------------------
-# Makefile estándar de devkitARM para 3DS (plantilla oficial de devkitPro),
-# con ROMFS activado. Este stub se compila UNA vez; el backend reempaqueta
-# el .elf resultante con distintas RomFS/rsf por juego usando makerom.
+# Adaptado del Makefile OFICIAL de devkitPro (repo devkitPro/3ds-examples,
+# ejemplo "romfs"), verificado línea a línea contra el original en vez de
+# escrito de memoria. Solo se han cambiado TARGET/ICON/APP_* y quitado lo
+# de gráficos (GRAPHICS/GFXBUILD/t3s), que no usamos.
 #---------------------------------------------------------------------------------
 .SUFFIXES:
+#---------------------------------------------------------------------------------
 
 ifeq ($(strip $(DEVKITARM)),)
 $(error "Please set DEVKITARM in your environment. export DEVKITARM=<path to>devkitARM")
@@ -13,107 +15,138 @@ TOPDIR ?= $(CURDIR)
 include $(DEVKITARM)/3ds_rules
 
 #---------------------------------------------------------------------------------
-# TARGET: nombre del ejecutable (sin extensión)
-# BUILD: carpeta intermedia de compilación
-# SOURCES: carpetas con código fuente
-# DATA: carpetas con datos arbitrarios
-# INCLUDES: carpetas con headers
-# ROMFS: carpeta cuyo contenido se empaqueta como RomFS del propio .3dsx
-#---------------------------------------------------------------------------------
-TARGET      := 3ds-forwarder-stub
-BUILD       := build
-SOURCES     := source
-DATA        := data
-INCLUDES    := include
-ROMFS       := romfs
+TARGET		:=	3ds-forwarder-stub
+BUILD		:=	build
+SOURCES		:=	source
+DATA		:=	data
+INCLUDES	:=	include
+ROMFS		:=	romfs
 
 APP_TITLE       := Forwarder
 APP_DESCRIPTION := 3ds-new-forwarder-generator stub
 APP_AUTHOR      := Manu
 
 #---------------------------------------------------------------------------------
-CFLAGS  := -g -Wall -O2 -mword-relocations \
-           -fomit-frame-pointer -ffunction-sections \
-           $(ARCH)
+ARCH	:=	-march=armv6k -mtune=mpcore -mfloat-abi=hard -mtp=soft
 
-CFLAGS  += $(INCLUDE) -DARM11 -D_3DS
-CXXFLAGS := $(CFLAGS) -fno-rtti -fno-exceptions -std=gnu++11
+CFLAGS	:=	-g -Wall -O2 -mword-relocations \
+			-ffunction-sections \
+			$(ARCH)
 
-ASFLAGS := -g $(ARCH)
-LDFLAGS := -specs=3dsx.specs -g $(ARCH) -Wl,-Map,$(notdir $*.map)
+CFLAGS	+=	$(INCLUDE) -D__3DS__
 
-LIBS    := -lctru -lm
+CXXFLAGS	:= $(CFLAGS) -fno-rtti -fno-exceptions -std=gnu++11
 
-LIBDIRS := $(CTRULIB)
+ASFLAGS	:=	-g $(ARCH)
+LDFLAGS	=	-specs=3dsx.specs -g $(ARCH) -Wl,-Map,$(notdir $*.map)
+
+LIBS	:= -lctru -lm
+
+LIBDIRS	:= $(CTRULIB)
 
 #---------------------------------------------------------------------------------
 ifneq ($(BUILD),$(notdir $(CURDIR)))
 #---------------------------------------------------------------------------------
 
-export OUTPUT   :=  $(CURDIR)/$(TARGET)
-export TOPDIR   :=  $(CURDIR)
+export OUTPUT	:=	$(CURDIR)/$(TARGET)
+export TOPDIR	:=	$(CURDIR)
 
-export VPATH    :=  $(foreach dir,$(SOURCES),$(CURDIR)/$(dir)) \
-                    $(foreach dir,$(DATA),$(CURDIR)/$(dir))
+export VPATH	:=	$(foreach dir,$(SOURCES),$(CURDIR)/$(dir)) \
+			$(foreach dir,$(DATA),$(CURDIR)/$(dir))
 
-export DEPSDIR  :=  $(CURDIR)/$(BUILD)
+export DEPSDIR	:=	$(CURDIR)/$(BUILD)
 
-CFILES      :=  $(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.c)))
-CPPFILES    :=  $(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.cpp)))
-SFILES      :=  $(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.s)))
-BINFILES    :=  $(foreach dir,$(DATA),$(notdir $(wildcard $(dir)/*.*)))
+CFILES		:=	$(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.c)))
+CPPFILES	:=	$(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.cpp)))
+SFILES		:=	$(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.s)))
+BINFILES	:=	$(foreach dir,$(DATA),$(notdir $(wildcard $(dir)/*.*)))
 
 #---------------------------------------------------------------------------------
 ifeq ($(strip $(CPPFILES)),)
-    export LD   :=  $(CC)
+#---------------------------------------------------------------------------------
+	export LD	:=	$(CC)
+#---------------------------------------------------------------------------------
 else
-    export LD   :=  $(CXX)
+#---------------------------------------------------------------------------------
+	export LD	:=	$(CXX)
+#---------------------------------------------------------------------------------
+endif
+#---------------------------------------------------------------------------------
+
+export OFILES_SOURCES 	:=	$(CPPFILES:.cpp=.o) $(CFILES:.c=.o) $(SFILES:.s=.o)
+
+export OFILES_BIN	:=	$(addsuffix .o,$(BINFILES))
+
+export OFILES := $(OFILES_BIN) $(OFILES_SOURCES)
+
+export HFILES	:=	$(addsuffix .h,$(subst .,_,$(BINFILES)))
+
+export INCLUDE	:=	$(foreach dir,$(INCLUDES),-I$(CURDIR)/$(dir)) \
+			$(foreach dir,$(LIBDIRS),-I$(dir)/include) \
+			-I$(CURDIR)/$(BUILD)
+
+export LIBPATHS	:=	$(foreach dir,$(LIBDIRS),-L$(dir)/lib)
+
+export _3DSXDEPS	:=	$(if $(NO_SMDH),,$(OUTPUT).smdh)
+
+ifeq ($(strip $(ICON)),)
+	icons := $(wildcard *.png)
+	ifneq (,$(findstring $(TARGET).png,$(icons)))
+		export APP_ICON := $(TOPDIR)/$(TARGET).png
+	else
+		ifneq (,$(findstring icon.png,$(icons)))
+			export APP_ICON := $(TOPDIR)/icon.png
+		endif
+	endif
+else
+	export APP_ICON := $(TOPDIR)/$(ICON)
 endif
 
-export OFILES_BIN   :=  $(addsuffix .o,$(BINFILES))
-export OFILES_SRC    :=  $(CPPFILES:.cpp=.o) $(CFILES:.c=.o) $(SFILES:.s=.o)
-export OFILES    :=  $(OFILES_BIN) $(OFILES_SRC)
-export HFILES_BIN    :=  $(addsuffix .h,$(subst .,_,$(BINFILES)))
-
-export INCLUDE  :=  $(foreach dir,$(INCLUDES),-I$(CURDIR)/$(dir)) \
-                    $(foreach dir,$(LIBDIRS),-I$(dir)/include) \
-                    -I$(CURDIR)/$(BUILD)
-
-export LIBPATHS :=  $(foreach dir,$(LIBDIRS),-L$(dir)/lib)
-
-ifeq ($(strip $(ROMFS)),)
-    export _3DSXFLAGS += --romfs=$(CURDIR)/$(ROMFS)
-else
-    export _3DSXFLAGS += --romfs=$(CURDIR)/$(ROMFS)
+ifeq ($(strip $(NO_SMDH)),)
+	export _3DSXFLAGS += --smdh=$(CURDIR)/$(TARGET).smdh
 endif
 
-.PHONY: $(BUILD) clean all
+ifneq ($(ROMFS),)
+	export _3DSXFLAGS += --romfs=$(CURDIR)/$(ROMFS)
+endif
+
+.PHONY: all clean
 
 #---------------------------------------------------------------------------------
-all: $(BUILD)
+all: $(BUILD) $(DEPSDIR)
+	@$(MAKE) --no-print-directory -C $(BUILD) -f $(CURDIR)/Makefile
 
 $(BUILD):
-	@[ -d $@ ] || mkdir -p $@
-	@$(MAKE) --no-print-directory -C $(BUILD) -f $(CURDIR)/Makefile
+	@mkdir -p $@
+
+ifneq ($(DEPSDIR),$(BUILD))
+$(DEPSDIR):
+	@mkdir -p $@
+endif
 
 #---------------------------------------------------------------------------------
 clean:
 	@echo clean ...
-	@rm -fr $(BUILD) $(TARGET).3dsx $(TARGET).smdh $(TARGET).elf
+	@rm -fr $(BUILD) $(TARGET).3dsx $(OUTPUT).smdh $(TARGET).elf
 
 #---------------------------------------------------------------------------------
 else
-.PHONY: all
-
-DEPENDS := $(OFILES:.o=.d)
 
 #---------------------------------------------------------------------------------
-all: $(OUTPUT).3dsx
+$(OUTPUT).3dsx	:	$(OUTPUT).elf $(_3DSXDEPS)
 
-$(OUTPUT).3dsx: $(OUTPUT).elf $(_3DSX_DEPS)
-$(OUTPUT).elf: $(OFILES)
+$(OFILES_SOURCES) : $(HFILES)
 
--include $(DEPENDS)
+$(OUTPUT).elf	:	$(OFILES)
 
+#---------------------------------------------------------------------------------
+%.bin.o	%_bin.h :	%.bin
+#---------------------------------------------------------------------------------
+	@echo $(notdir $<)
+	@$(bin2o)
+
+-include $(DEPSDIR)/*.d
+
+#---------------------------------------------------------------------------------------
 endif
-#---------------------------------------------------------------------------------
+#---------------------------------------------------------------------------------------
