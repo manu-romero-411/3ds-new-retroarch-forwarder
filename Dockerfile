@@ -14,7 +14,7 @@ ENV PATH=${DEVKITARM}/bin:${DEVKITPRO}/tools/bin:${PATH}
 # git hace falta porque bannertool trae un submódulo (buildtools).
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        g++ gcc make zip unzip curl git ca-certificates && \
+        g++ gcc make zip unzip curl git ca-certificates python3 && \
     rm -rf /var/lib/apt/lists/*
 
 # ---------------------------------------------------------------------------
