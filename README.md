@@ -32,6 +32,16 @@ Luma3DS/Rosalina (sin soporte para entrypoints legacy tipo *hax).
 │   ├── generate_cores_table.py
 │   ├── generate_placeholder_assets.py
 │   └── build_forwarder.py        # generador por juego (backend, punto de entrada para una UI futura)
+├── ui/                            # UI de escritorio (PySide6/Qt), ver ui/README.md
+│   ├── app.py                    # entry point (`python3 -m ui.app`)
+│   ├── main_window.py
+│   ├── settings.py
+│   ├── sgdb/                     # cliente SteamGridDB + composición hero+logo
+│   ├── dialogs/                  # diálogos modales (conflicto de juego, galería)
+│   ├── widgets/                  # formulario + panel de artwork + log
+│   └── workers/                  # hilos de fondo (red y build)
+├── run_ui.py                      # lanzador de la UI desde la raíz del proyecto
+├── requirements-ui.txt            # dependencias extra de la UI (PySide6, requests, Pillow)
 ├── scripts/
 │   └── build_stub.sh
 └── output/                       # .cia generados (gitignored)
@@ -72,6 +82,18 @@ Las rutas de icono/banner/audio son opcionales (Enter en blanco = usar el
 valor por defecto) y, si las das, también se validan que el fichero
 exista antes de seguir.
 
+### UI gráfica (PySide6/Qt)
+
+También hay una UI de escritorio en `ui/` con los mismos campos que la CLI,
+más un buscador de artwork contra SteamGridDB (icono, hero y logo, con
+composición automática del banner y previsualización). Documentación
+completa (instalación, flujo de uso) en `ui/README.md`; arranque rápido:
+
+```bash
+pip3 install -r requirements-ui.txt
+python3 run_ui.py
+```
+
 ## Estado actual
 
 - [x] Diseño de arquitectura (stub compilado una vez + reempaquetado por juego)
@@ -90,11 +112,14 @@ exista antes de seguir.
       (`tools/media_prep.py`, vía `ffmpeg`).
 - [x] Modo interactivo (`tools/interactive_build.py`): pide cada campo uno
       a uno y corta con error en cuanto el core no existe en el catálogo.
-- [ ] Icono/banner por juego reales de tu colección (si no los pasas, cae
-      a placeholder).
-- [ ] UI / frontend — `tools/build_forwarder.py` está pensado para
-      importarse directamente (`build_forwarder()`) en vez de invocarse solo
-      por CLI, precisamente para esto.
+- [x] Icono/banner por juego reales de tu colección: la UI (`ui/`) permite
+      buscarlos en SteamGridDB (icono, hero y logo por separado) o
+      cargarlos desde un fichero local; si no se elige ninguno, se sigue
+      cayendo al placeholder de siempre.
+- [x] UI / frontend (`ui/`, PySide6/Qt) — reutiliza directamente
+      `build_forwarder()` sin duplicar lógica; ver `ui/README.md` (en
+      inglés) para el flujo completo, incluida la búsqueda/composición de
+      artwork vía SteamGridDB.
 
 ## Generación determinista del Title ID
 

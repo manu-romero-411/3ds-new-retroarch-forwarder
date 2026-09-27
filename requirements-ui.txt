@@ -1,0 +1,8 @@
+# Dependencies for the Qt UI only (ui/), on top of what the Docker image
+# already provides for the CLI/build toolchain (makerom, bannertool, ffmpeg).
+#
+#     pip3 install -r requirements-ui.txt
+#
+PySide6>=6.6
+requests>=2.31
+Pillow>=10.0

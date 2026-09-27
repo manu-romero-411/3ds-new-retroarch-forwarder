@@ -5,6 +5,10 @@ Builds a temporary RomFS (``core.txt`` + ``content.path``) and hands it to
 ``makerom`` via ``-DROMFS_DIR``, together with a deterministically-generated,
 collision-checked Title ID (see ``tools/title_id.py``).
 
+``make``, ``bannertool`` and ``makerom`` only exist inside the project's
+Docker image (see ``tools/devkit_runtime.py``); nothing in this module
+shells out to them on the host directly.
+
 This module is the intended integration point for a future frontend: call
 ``build_forwarder()`` directly instead of shelling out to this file's CLI.
 """
@@ -12,13 +16,19 @@ This module is the intended integration point for a future frontend: call
 from __future__ import annotations
 
 import argparse
-import subprocess
+import shutil
 import sys
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
 from tools.cores_registry import CoreRegistry, DEFAULT_CORES_JSON
+from tools.devkit_runtime import (
+    PROJECT_ROOT,
+    devkit_tmp_dir,
+    ensure_devkit_image_exists,
+    run_devkit,
+    to_container_path,
+)
 from tools.generate_placeholder_assets import ensure_placeholder_assets
 from tools.media_prep import prepare_banner_audio, prepare_banner_image, prepare_icon
 from tools.title_id import (
@@ -28,7 +38,6 @@ from tools.title_id import (
     generate_title_id,
 )
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
 STUB_DIR = PROJECT_ROOT / "stub"
 STUB_ELF = STUB_DIR / "3ds-forwarder-stub.elf"
 RSF_TEMPLATE = STUB_DIR / "forwarder.rsf"
@@ -61,14 +70,16 @@ def normalize_sd_path(rom_path: str) -> str:
 
 
 def build_stub_if_needed() -> None:
-    """Compile the stub .elf via its own Makefile, unless already built."""
+    """Compile the stub .elf via its own Makefile (inside Docker), unless already built."""
     if STUB_ELF.exists():
         print(f"[*] Stub already built: {STUB_ELF}")
         return
     print(f"[*] {STUB_ELF} not found. Building stub...")
-    result = subprocess.run(["make"], cwd=STUB_DIR, check=False)
+    result = run_devkit(["make"], cwd=STUB_DIR)
     if result.returncode != 0 or not STUB_ELF.exists():
         print("ERROR: failed to build the stub.", file=sys.stderr)
+        print(f"    stdout: {result.stdout.strip()}", file=sys.stderr)
+        print(f"    stderr: {result.stderr.strip()}", file=sys.stderr)
         sys.exit(1)
     print("[+] Stub built successfully.")
 
@@ -99,7 +110,7 @@ def generate_smdh_banner(
     banner_path: Path,
     audio_path: Path,
 ) -> tuple[Path, Path]:
-    """Run bannertool to produce icon.icn and banner.bnr."""
+    """Run bannertool (inside Docker) to produce icon.icn and banner.bnr."""
     icon_icn = tmp_dir / "icon.icn"
     banner_bnr = tmp_dir / "banner.bnr"
 
@@ -115,12 +126,12 @@ def generate_smdh_banner(
         "-f",
         "visible,recordusage",
         "-i",
-        str(icon_path),
+        to_container_path(icon_path),
         "-o",
-        str(icon_icn),
+        to_container_path(icon_icn),
     ]
     print(f"[*] Generating icon from: {icon_path}")
-    result = subprocess.run(cmd_smdh, capture_output=True, text=True, check=False)
+    result = run_devkit(cmd_smdh)
     if result.returncode != 0:
         print("ERROR: bannertool makesmdh failed.", file=sys.stderr)
         print(f"    stdout: {result.stdout.strip()}", file=sys.stderr)
@@ -132,14 +143,14 @@ def generate_smdh_banner(
         "bannertool",
         "makebanner",
         "-i",
-        str(banner_path),
+        to_container_path(banner_path),
         "-a",
-        str(audio_path),
+        to_container_path(audio_path),
         "-o",
-        str(banner_bnr),
+        to_container_path(banner_bnr),
     ]
     print(f"[*] Generating banner from: {banner_path}")
-    result = subprocess.run(cmd_banner, capture_output=True, text=True, check=False)
+    result = run_devkit(cmd_banner)
     if result.returncode != 0:
         print("ERROR: bannertool makebanner failed.", file=sys.stderr)
         print(f"    stdout: {result.stdout.strip()}", file=sys.stderr)
@@ -156,6 +167,8 @@ def build_forwarder(
     title_id_registry_path: Path = DEFAULT_REGISTRY_PATH,
 ) -> int:
     """Build one forwarder .cia end to end. Returns the assigned Unique ID."""
+    ensure_devkit_image_exists()
+
     core_registry = CoreRegistry.load(cores_json)
     core_registry.require(request.core)  # validates and exits on failure
 
@@ -181,7 +194,10 @@ def build_forwarder(
 
     build_stub_if_needed()
 
-    with tempfile.TemporaryDirectory() as tmp_dir_str:
+    # Scratch space must live under the project (not the system /tmp) so
+    # it is visible inside the Docker container that runs bannertool and
+    # makerom -- see tools/devkit_runtime.py.
+    with devkit_tmp_dir() as tmp_dir_str:
         tmp_dir = Path(tmp_dir_str)
         print("[*] Preparing temporary RomFS...")
         romfs_dir = create_romfs(tmp_dir, request.core, clean_rom_path)
@@ -200,6 +216,9 @@ def build_forwarder(
         # source is a user-supplied file or a placeholder: stretch (never
         # crop) the icon/banner to their fixed SMDH sizes, and re-encode
         # the audio to the 16-bit/44.1kHz/stereo WAV bannertool expects.
+        # This step runs ffmpeg on the host, so icon_source/banner_source
+        # may live anywhere -- only its *output* under tmp_dir needs to be
+        # visible to the container.
         icon_png = tmp_dir / "icon_48x48.png"
         banner_png = tmp_dir / "banner_256x128.png"
         audio_wav = tmp_dir / "audio_prepared.wav"
@@ -217,7 +236,10 @@ def build_forwarder(
             audio_wav,
         )
 
-        request.output.parent.mkdir(parents=True, exist_ok=True)
+        # makerom always writes inside the project (tmp_dir); the
+        # user-requested --output may point anywhere on the host (e.g. a
+        # mounted SD card), so it is copied there afterwards, on the host.
+        local_cia = tmp_dir / "forwarder.cia"
 
         print(f"[*] Packaging CIA -> {request.output}")
         cmd_makerom = [
@@ -228,24 +250,27 @@ def build_forwarder(
             "t",
             "-exefslogo",
             "-o",
-            str(request.output),
+            to_container_path(local_cia),
             "-elf",
-            str(STUB_ELF),
+            to_container_path(STUB_ELF),
             "-rsf",
-            str(RSF_TEMPLATE),
+            to_container_path(RSF_TEMPLATE),
             "-icon",
-            str(icon_icn),
+            to_container_path(icon_icn),
             "-banner",
-            str(banner_bnr),
-            f"-DROMFS_DIR={romfs_dir}",
+            to_container_path(banner_bnr),
+            f"-DROMFS_DIR={to_container_path(romfs_dir)}",
             f"-DUNIQUE_ID=0x{unique_id:05X}",
         ]
-        result = subprocess.run(cmd_makerom, capture_output=True, text=True, check=False)
+        result = run_devkit(cmd_makerom)
         if result.returncode != 0:
             print("ERROR: makerom failed.", file=sys.stderr)
             print(f"    stdout: {result.stdout.strip()}", file=sys.stderr)
             print(f"    stderr: {result.stderr.strip()}", file=sys.stderr)
             sys.exit(1)
+
+        request.output.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(local_cia, request.output)
 
     print(f"\n[+] SUCCESS! CIA generated at: {request.output.resolve()}")
     print(f"[*] Unique Title ID: 0x{title_id:016X}")

@@ -17,6 +17,9 @@ stub/debug_*.bmp
 # --- Generated per-game forwarders ------------------------------------------
 output/
 
+# --- Docker build scratch space (see tools/devkit_runtime.py) --------------
+.devkit-tmp/
+
 # --- Python -----------------------------------------------------------------
 __pycache__/
 *.pyc

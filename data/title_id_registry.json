@@ -1,18 +1,18 @@
 [
   {
-    "key": "Super Mario World\u001fSMW\u001fSuper Mario World (USA)\u001fNintendo\u001fsnes9x2005\u001froms/snes/Super Mario World (USA).zip",
-    "unique_id": 998113,
-    "name": "Super Mario World",
+    "key": "Super Mario World (USA)\u001fSuper Mario World\u001fSuper Mario World\u001fNintendo\u001fsnes9x2005\u001froms/snes/Super Mario World (USA).zip",
+    "unique_id": 1020858,
+    "name": "Super Mario World (USA)",
     "core": "snes9x2005",
     "rom_path": "roms/snes/Super Mario World (USA).zip",
     "resolved_with_nonce": 0
   },
   {
-    "key": "Super Mario World\u001fSuper Mario World\u001fSuper Mario World\u001fNintendo\u001fsnes9x2005\u001froms/snes/Super Mario World (USA).zip",
-    "unique_id": 1046395,
-    "name": "Super Mario World",
-    "core": "snes9x2005",
-    "rom_path": "roms/snes/Super Mario World (USA).zip",
+    "key": "Bust-A-Move 4 (Europe)\u001fBust-A-Move 4\u001fBust-A-Move 4\u001fTaito\u001fpcsx_rearmed\u001froms/psx/Bust-a-Move 4 (Europe).chd",
+    "unique_id": 991244,
+    "name": "Bust-A-Move 4 (Europe)",
+    "core": "pcsx_rearmed",
+    "rom_path": "roms/psx/Bust-a-Move 4 (Europe).chd",
     "resolved_with_nonce": 0
   }
 ]
