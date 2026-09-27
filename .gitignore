@@ -1,61 +1,31 @@
-# Prerequisites
-*.d
+# --- devkitARM / 3DS build artifacts (stub/) -------------------------------
+stub/build/
+stub/*.3dsx
+stub/*.smdh
+stub/*.elf
+stub/*.cia
+stub/*.map
+stub/*.lst
+stub/*.d
+stub/icon.icn
+stub/banner.bnr
+stub/icon.png
+stub/banner.png
+stub/audio.wav
+stub/debug_*.bmp
 
-# Object files
-*.o
-*.ko
-*.obj
-*.elf
+# --- Generated per-game forwarders ------------------------------------------
+output/
 
-# Linker output
-*.ilk
-*.map
-*.exp
+# --- Python -----------------------------------------------------------------
+__pycache__/
+*.pyc
+.venv/
+.mypy_cache/
+.pylint.d/
 
-# Precompiled Headers
-*.gch
-*.pch
-
-# Libraries
-*.lib
-*.a
-*.la
-*.lo
-
-# Shared objects (inc. Windows DLLs)
-*.dll
-*.so
-*.so.*
-*.dylib
-
-# Executables
-*.exe
-*.out
-*.app
-*.i*86
-*.x86_64
-*.hex
-
-# Debug files
-*.dSYM/
-*.su
-*.idb
-*.pdb
-
-# Kernel Module Compile Results
-*.mod*
-*.cmd
-.tmp_versions/
-modules.order
-Module.symvers
-Mkfile.old
-dkms.conf
-
-# debug information files
-*.dwo
-
-/build/
-/stub/
-*.3dsx
-*.smdh
-*.elf
+# --- Editor / OS --------------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+.DS_Store

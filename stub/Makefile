@@ -1,8 +1,8 @@
 #---------------------------------------------------------------------------------
-# Adaptado del Makefile OFICIAL de devkitPro (repo devkitPro/3ds-examples,
-# ejemplo "romfs"), verificado línea a línea contra el original en vez de
-# escrito de memoria. Solo se han cambiado TARGET/ICON/APP_* y quitado lo
-# de gráficos (GRAPHICS/GFXBUILD/t3s), que no usamos.
+# Adapted from devkitPro's OFFICIAL Makefile (devkitPro/3ds-examples repo,
+# "romfs" example), checked line by line against the original rather than
+# written from memory. Only TARGET/ICON/APP_* were changed, and the graphics
+# bits (GRAPHICS/GFXBUILD/t3s) were dropped since this project doesn't use them.
 #---------------------------------------------------------------------------------
 .SUFFIXES:
 #---------------------------------------------------------------------------------
@@ -21,6 +21,9 @@ SOURCES		:=	source
 DATA		:=	data
 INCLUDES	:=	include
 ROMFS		:=	romfs
+
+# Path to the shared Python tooling, one level up from this Makefile.
+TOOLS_DIR	:=	$(TOPDIR)/../tools
 
 APP_TITLE       := Forwarder
 APP_DESCRIPTION := 3ds-new-forwarder-generator stub
@@ -45,8 +48,8 @@ LIBS	:= -lctru -lm
 LIBDIRS	:= $(CTRULIB)
 
 #---------------------------------------------------------------------------------
-# Empaquetado como CIA (para instalar con FBI en vez de correr como .3dsx
-# suelto vía Homebrew Launcher). Ver forwarder.rsf para el porqué.
+# CIA packaging (installed with FBI instead of run as a loose .3dsx via
+# Homebrew Launcher). See forwarder.rsf for the reasoning.
 #---------------------------------------------------------------------------------
 BANNERTOOL	?=	bannertool
 MAKEROM		?=	makerom
@@ -139,17 +142,17 @@ clean:
 		icon.icn banner.bnr icon.png banner.png audio.wav
 
 #---------------------------------------------------------------------------------
-# Assets placeholder (icon.png / banner.png / audio.wav): se generan solo si
-# no existen ya, así que si más adelante pones arte propio con esos mismos
-# nombres, no se pisa.
+# Placeholder assets (icon.png / banner.png / audio.wav): only generated if
+# missing, so dropping in real artwork under the same names never gets
+# overwritten.
 #---------------------------------------------------------------------------------
 icon.png banner.png audio.wav:
-	python3 $(TOPDIR)/tools/generate_placeholder_assets.py
+	python3 $(TOOLS_DIR)/generate_placeholder_assets.py --out-dir $(TOPDIR)
 
 icon.icn: icon.png
-	@# "-f visible,recordusage": sin "visible" el título se instala e
-	@# incluso arranca desde FBI, pero el HOME Menu no lo lista (FBI sí
-	@# lista todo lo instalado, con o sin este flag).
+	@# "-f visible,recordusage": without "visible" the title installs and
+	@# even launches from FBI, but the HOME Menu won't list it (FBI lists
+	@# everything installed regardless of this flag).
 	$(BANNERTOOL) makesmdh -i icon.png -s "$(APP_TITLE)" -l "$(APP_DESCRIPTION)" \
 		-p "$(APP_AUTHOR)" -f visible,recordusage -o icon.icn
 
@@ -157,18 +160,18 @@ banner.bnr: banner.png audio.wav
 	$(BANNERTOOL) makebanner -i banner.png -a audio.wav -o banner.bnr
 
 #---------------------------------------------------------------------------------
-# .cia: primero se asegura el .elf (target 'all', ya construye el .3dsx de
-# paso) y después empaqueta con makerom usando ese mismo .elf + el RomFS +
+# .cia: first ensures the .elf (target 'all', which builds the .3dsx along
+# the way), then packages it with makerom using that same .elf + RomFS +
 # icon/banner + forwarder.rsf.
 #---------------------------------------------------------------------------------
 .PHONY: cia
 cia: all icon.icn banner.bnr
-	@# El RomFS NO se pasa por CLI: ya está indicado en forwarder.rsf
-	@# (RomFs: RootPath: romfs), makerom lo toma de ahí.
+	@# The RomFS is NOT passed on the CLI: it is already set in
+	@# forwarder.rsf (RomFs: RootPath: romfs), makerom reads it from there.
 	$(MAKEROM) -f cia -o $(TARGET).cia -rsf $(RSF) -target t -exefslogo \
 		-elf $(OUTPUT).elf -icon icon.icn -banner banner.bnr
 	@echo "--------------------------------------------------------------"
-	@echo " CIA generado: $(TARGET).cia -- instalalo con FBI"
+	@echo " CIA generated: $(TARGET).cia -- install it with FBI"
 	@echo "--------------------------------------------------------------"
 
 #---------------------------------------------------------------------------------

@@ -16,9 +16,9 @@
 #define CORE_NAME_MAXLEN 64
 #define CORES_SD_DIR     "retroarch/cores/"
 
-/* Evita que fatal_error() borre la pantalla (vía consoleInit) si la consola
- * ya estaba inicializada y tiene mensajes de error previos útiles en pantalla
- * (p. ej. el motivo real de un fallo de instalación de CIA). */
+/* Prevents fatal_error() from clearing the screen (via consoleInit) if the
+ * console was already initialized and has useful earlier error messages on
+ * screen (e.g. the real reason a CIA install failed). */
 static bool g_console_ready = false;
 
 /* SHA-256("ARGV") - used by libctru's __system_initArgv() */
@@ -218,10 +218,10 @@ static int installCia(const char *ciaPath)
     }
 
     printf("Opening CIA file: %s\n", ciaPath);
-    /* Skip only "sdmc:" (5 chars), NOT "sdmc:/" (6): FSUSER necesita la
-     * barra inicial en el path ("/retroarch/cores/xxx.cia"), igual que
-     * hace exec_cia.c original de RetroArch (path + 5). Si se salta la
-     * barra, FSUSER_OpenFile falla y toda la instalación aborta. */
+    /* Skip only "sdmc:" (5 chars), NOT "sdmc:/" (6): FSUSER needs the
+     * leading slash in the path ("/retroarch/cores/xxx.cia"), just like
+     * RetroArch's original ctr/exec_cia.c does (path + 5). Skipping the
+     * slash makes FSUSER_OpenFile fail and aborts the whole install. */
     const char *relPath = ciaPath;
     if (strncmp(relPath, "sdmc:", 5) == 0)
         relPath += 5;
@@ -334,9 +334,9 @@ int main(void)
     char content_path[MAX_PATH_LEN];
     char core_cia_path[MAX_PATH_LEN];
 
-    /* Read configuration from RomFS: solo el nombre del core (libretro_name)
-     * y la ruta del contenido. Title ID y ruta del CIA salen de CORES_TABLE,
-     * generada a partir de cores.json (ver cores_table.h). */
+    /* Read config from RomFS: just the core name (libretro_name) and the
+     * content path. Title ID and CIA path come from CORES_TABLE, generated
+     * from cores.json (see cores_table.h). */
     read_core_name_from_romfs("romfs:/core.txt", core_name, sizeof(core_name));
     read_sd_path_from_romfs("romfs:/content.path", content_path, sizeof(content_path));
 
@@ -344,7 +344,7 @@ int main(void)
 
     const core_entry_t *core = lookup_core(core_name);
     if (!core)
-        fatal_error("ERROR: Unknown core '%s'\n(cores_table.h desactualizada?)", core_name);
+        fatal_error("ERROR: Unknown core '%s'\n(is cores_table.h out of date?)", core_name);
 
     u64 core_title_id = core->title_id;
     if (snprintf(core_cia_path, sizeof(core_cia_path), "%s%s%s",
@@ -391,17 +391,17 @@ int main(void)
     int argsLength = 0;
     char *argLocation = param.args;
 
-    /* argv[0]: nombre de "programa" (RetroArch lo ignora, pero tiene que
-     * estar presente: el contenido va en argv[1], no en argv[0] -- así lo
-     * hace el ctr/exec-3dsx/exec_cia.c original de RetroArch. Sin este
-     * argv[0] "de relleno", RetroArch arranca sin detectar ningún ROM). */
+    /* argv[0]: "program" name (RetroArch ignores it, but it must be
+     * present: the content goes in argv[1], not argv[0] -- this matches
+     * RetroArch's original ctr/exec-3dsx/exec_cia.c. Without this "filler"
+     * argv[0], RetroArch starts up without detecting any ROM). */
     static const char *arg0 = "retroarch";
     strcpy(argLocation, arg0);
     argLocation += strlen(arg0) + 1;
     argsLength += strlen(arg0) + 1;
     param.argc++;
 
-    /* argv[1]: ruta del contenido a cargar */
+    /* argv[1]: path to the content to load */
     strcpy(argLocation, content_path);
     argLocation += strlen(content_path) + 1;
     argsLength += strlen(content_path) + 1;

@@ -1,0 +1,27 @@
+[tool.pylint.main]
+py-version = "3.11"
+
+[tool.pylint.format]
+max-line-length = 100
+
+[tool.pylint."messages control"]
+# - missing-module-docstring/missing-function-docstring: most public
+#   functions have one; disabled so private one-liners aren't flagged.
+# - too-many-arguments/too-many-locals: build_forwarder.py's CLI glue
+#   genuinely needs a flat argument list; a config object would just move
+#   the same fields around for no readability gain at this size.
+disable = [
+    "missing-module-docstring",
+    "missing-function-docstring",
+    "too-many-arguments",
+    "too-many-positional-arguments",
+    "too-many-locals",
+    "too-few-public-methods",
+    # CoreEntry/ForwarderRequest are plain data records; splitting their
+    # fields into nested objects would add indirection without adding
+    # meaning at this size.
+    "too-many-instance-attributes",
+]
+
+[tool.pylint.basic]
+good-names = ["f", "i", "n"]
