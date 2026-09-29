@@ -4,8 +4,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <errno.h>
-#include <math.h>
 #include <sys/stat.h>
 
 #include "cores_table.h"
@@ -16,10 +14,12 @@
 #define CORE_NAME_MAXLEN 64
 #define CORES_SD_DIR     "retroarch/cores/"
 
-/* Prevents fatal_error() from clearing the screen (via consoleInit) if the
- * console was already initialized and has useful earlier error messages on
- * screen (e.g. the real reason a CIA install failed). */
+/* Set to true once the console has been initialized, so a later
+ * fatal_error() does not clear a message that is already on screen. */
 static bool g_console_ready = false;
+
+/* Last install error, filled by installCia() and shown by the caller. */
+static char g_install_err[MAX_PATH_LEN + 64];
 
 /* SHA-256("ARGV") - used by libctru's __system_initArgv() */
 static char argvHmac[0x20] = {
@@ -34,6 +34,8 @@ typedef struct {
     char args[0x300 - 0x4];
 } ciaParam;
 
+/* Shows an error on the top screen and waits for START. The console is
+ * created lazily here, so nothing is drawn during a normal launch. */
 static void fatal_error(const char *fmt, ...)
 {
     if (!g_console_ready)
@@ -54,8 +56,7 @@ static void fatal_error(const char *fmt, ...)
     while (aptMainLoop())
     {
         hidScanInput();
-        u32 kDown = hidKeysDown();
-        if (kDown & KEY_START)
+        if (hidKeysDown() & KEY_START)
             break;
 
         gfxFlushBuffers();
@@ -67,56 +68,41 @@ static void fatal_error(const char *fmt, ...)
     exit(1);
 }
 
-static void read_sd_path_from_romfs(const char *romfs_path, char *out, size_t out_size)
+/* Reads a single-line text file from RomFS into buf, trimming trailing
+ * whitespace/newlines. Aborts with an error if it is missing or empty. */
+static void read_line_from_romfs(const char *romfs_path, char *buf, size_t buf_size)
 {
     FILE *f = fopen(romfs_path, "rb");
     if (!f)
-        fatal_error("ERROR: Cannot open %s", romfs_path);
+        fatal_error("Missing RomFS file:\n%s", romfs_path);
 
-    char buf[MAX_PATH_LEN];
-    size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+    size_t n = fread(buf, 1, buf_size - 1, f);
     fclose(f);
 
-    if (n == 0)
-        fatal_error("ERROR: File empty: %s", romfs_path);
-
+    while (n > 0 && (buf[n - 1] == '\n' || buf[n - 1] == '\r' || buf[n - 1] == ' '))
+        n--;
     buf[n] = '\0';
 
-    /* Trim whitespace and newlines */
-    while (n > 0 && (buf[n-1] == '\n' || buf[n-1] == '\r' || buf[n-1] == ' '))
-        buf[--n] = '\0';
-
     if (n == 0)
-        fatal_error("ERROR: Path is empty");
+        fatal_error("Empty RomFS file:\n%s", romfs_path);
+}
+
+static void read_sd_path_from_romfs(const char *romfs_path, char *out, size_t out_size)
+{
+    char buf[MAX_PATH_LEN];
+    read_line_from_romfs(romfs_path, buf, sizeof(buf));
 
     if (snprintf(out, out_size, "%s%s", SD_PREFIX, buf) >= (int)out_size)
-        fatal_error("ERROR: Path too long");
+        fatal_error("Path too long in:\n%s", romfs_path);
 }
 
 static void read_core_name_from_romfs(const char *romfs_path, char *out, size_t out_size)
 {
-    FILE *f = fopen(romfs_path, "rb");
-    if (!f)
-        fatal_error("ERROR: Cannot open %s", romfs_path);
-
     char buf[CORE_NAME_MAXLEN];
-    size_t n = fread(buf, 1, sizeof(buf) - 1, f);
-    fclose(f);
-
-    if (n == 0)
-        fatal_error("ERROR: File empty: %s", romfs_path);
-
-    buf[n] = '\0';
-
-    /* Trim whitespace and newlines */
-    while (n > 0 && (buf[n-1] == '\n' || buf[n-1] == '\r' || buf[n-1] == ' '))
-        buf[--n] = '\0';
-
-    if (n == 0)
-        fatal_error("ERROR: Core name is empty");
+    read_line_from_romfs(romfs_path, buf, sizeof(buf));
 
     if (snprintf(out, out_size, "%s", buf) >= (int)out_size)
-        fatal_error("ERROR: Core name too long: %s", buf);
+        fatal_error("Core name too long in:\n%s", romfs_path);
 }
 
 static const core_entry_t *lookup_core(const char *libretro_name)
@@ -129,70 +115,50 @@ static const core_entry_t *lookup_core(const char *libretro_name)
     return NULL;
 }
 
-static int isCiaInstalled(u64 titleId, u16 version)
+static bool file_exists(const char *path)
+{
+    struct stat st;
+    return stat(path, &st) == 0;
+}
+
+/* Returns 1 if the title exists on the SD card (any version), 0 if not,
+ * -1 on error. */
+static int isCoreInstalled(u64 titleId)
 {
     u32 titlesToRetrieve;
     u32 titlesRetrieved;
-    u64* titleIds;
-    u32 titlesToCheck;
-    AM_TitleEntry titleInfo;
-    bool titleExists = false;
-    
-    Result failed = AM_GetTitleCount(MEDIATYPE_SD, &titlesToRetrieve);
-    if (R_FAILED(failed))
+    int found = 0;
+
+    if (R_FAILED(AM_GetTitleCount(MEDIATYPE_SD, &titlesToRetrieve)))
         return -1;
 
-    titleIds = malloc(titlesToRetrieve * sizeof(u64));
+    u64 *titleIds = malloc(titlesToRetrieve * sizeof(u64));
     if (!titleIds)
         return -1;
 
-    failed = AM_GetTitleList(&titlesRetrieved, MEDIATYPE_SD, titlesToRetrieve, titleIds);
-    if (R_FAILED(failed))
+    if (R_FAILED(AM_GetTitleList(&titlesRetrieved, MEDIATYPE_SD, titlesToRetrieve, titleIds)))
     {
         free(titleIds);
         return -1;
     }
 
-    for (titlesToCheck = 0; titlesToCheck < titlesRetrieved; titlesToCheck++)
+    for (u32 i = 0; i < titlesRetrieved; i++)
     {
-        if (titleIds[titlesToCheck] == titleId)
+        if (titleIds[i] == titleId)
         {
-            titleExists = true;
+            found = 1;
             break;
         }
     }
 
     free(titleIds);
-
-    if (titleExists)
-    {
-        failed = AM_GetTitleInfo(MEDIATYPE_SD, 1, &titleId, &titleInfo);
-        if (R_FAILED(failed))
-            return -1;
-
-        if (titleInfo.version == version)
-            return 1;
-    }
-
-    return 0;
+    return found;
 }
 
-static void __attribute__((unused)) deleteCia(u64 titleId)
-{
-    u64 currTitleId = 0;
-
-    /* Do not delete if the titleid is currently running */
-    if (R_FAILED(APT_GetAppletInfo((NS_APPID)envGetAptAppId(), &currTitleId, NULL, NULL, NULL, NULL)) 
-        || titleId != currTitleId)
-    {
-        AM_DeleteTitle(MEDIATYPE_SD, titleId);
-        AM_DeleteTicket(titleId);
-    }
-}
-
+/* Installs a CIA from the SD card. Returns 1 on success (or if it already
+ * exists), -1 on failure with the reason stored in g_install_err. */
 static int installCia(const char *ciaPath)
 {
-    struct stat sBuff;
     Handle ciaFile;
     FS_Archive ciaArchive;
     Handle outputHandle;
@@ -201,142 +167,115 @@ static int installCia(const char *ciaPath)
     u32 bytesWritten;
     u8 transferBuffer[FILE_CHUNK_SIZE];
     u64 fileOffset = 0;
+    Result res;
 
-    if (stat(ciaPath, &sBuff) != 0)
-    {
-        printf("ERROR: CIA file not found: %s\n", ciaPath);
-        return -1;
-    }
-
-    printf("Opening SD archive...\n");
-    Result res = FSUSER_OpenArchive(&ciaArchive,
-            ARCHIVE_SDMC, fsMakePath(PATH_EMPTY, ""));
+    res = FSUSER_OpenArchive(&ciaArchive, ARCHIVE_SDMC, fsMakePath(PATH_EMPTY, ""));
     if (R_FAILED(res))
     {
-        printf("ERROR: Cannot open SD archive (0x%08lX)\n", res);
+        snprintf(g_install_err, sizeof(g_install_err),
+                 "Cannot open SD archive (0x%08lX)", res);
         return -1;
     }
 
-    printf("Opening CIA file: %s\n", ciaPath);
-    /* Skip only "sdmc:" (5 chars), NOT "sdmc:/" (6): FSUSER needs the
-     * leading slash in the path ("/retroarch/cores/xxx.cia"), just like
-     * RetroArch's original ctr/exec_cia.c does (path + 5). Skipping the
-     * slash makes FSUSER_OpenFile fail and aborts the whole install. */
+    /* Skip only "sdmc:" (5 chars), NOT "sdmc:/": FSUSER needs the leading
+     * slash ("/retroarch/cores/xxx.cia"), like RetroArch's exec_cia.c. */
     const char *relPath = ciaPath;
     if (strncmp(relPath, "sdmc:", 5) == 0)
         relPath += 5;
 
-    res = FSUSER_OpenFile(&ciaFile, ciaArchive,
-            fsMakePath(PATH_ASCII, relPath),
-            FS_OPEN_READ, 0);
+    res = FSUSER_OpenFile(&ciaFile, ciaArchive, fsMakePath(PATH_ASCII, relPath), FS_OPEN_READ, 0);
     if (R_FAILED(res))
     {
-        printf("ERROR: Cannot open CIA file (0x%08lX)\n", res);
+        snprintf(g_install_err, sizeof(g_install_err),
+                 "Cannot open CIA (0x%08lX):\n%s", res, ciaPath);
         FSUSER_CloseArchive(ciaArchive);
         return -1;
     }
 
-    printf("Starting CIA install...\n");
     res = AM_StartCiaInstall(MEDIATYPE_SD, &outputHandle);
     if (R_FAILED(res))
     {
-        printf("ERROR: Cannot start CIA install (0x%08lX)\n", res);
-        FSFILE_Close(ciaFile);
-        FSUSER_CloseArchive(ciaArchive);
-        return -1;
+        snprintf(g_install_err, sizeof(g_install_err),
+                 "Cannot start CIA install (0x%08lX)", res);
+        goto fail_close;
     }
 
     res = FSFILE_GetSize(ciaFile, &fileSize);
     if (R_FAILED(res))
     {
-        printf("ERROR: Cannot get CIA file size (0x%08lX)\n", res);
-        AM_CancelCIAInstall(outputHandle);
-        FSFILE_Close(ciaFile);
-        FSUSER_CloseArchive(ciaArchive);
-        return -1;
+        snprintf(g_install_err, sizeof(g_install_err),
+                 "Cannot get CIA size (0x%08lX)", res);
+        goto fail_cancel;
     }
-
-    printf("Installing %llu bytes...\n", fileSize);
 
     while (fileOffset < fileSize)
     {
         u64 bytesRemaining = fileSize - fileOffset;
-        u32 chunkSize = bytesRemaining < FILE_CHUNK_SIZE ? bytesRemaining : FILE_CHUNK_SIZE;
+        u32 chunkSize = bytesRemaining < FILE_CHUNK_SIZE ? (u32)bytesRemaining : FILE_CHUNK_SIZE;
 
         res = FSFILE_Read(ciaFile, &bytesRead, fileOffset, transferBuffer, chunkSize);
         if (R_FAILED(res))
         {
-            printf("ERROR: Read failed at offset %llu (0x%08lX)\n", fileOffset, res);
-            AM_CancelCIAInstall(outputHandle);
-            FSFILE_Close(ciaFile);
-            FSUSER_CloseArchive(ciaArchive);
-            return -1;
+            snprintf(g_install_err, sizeof(g_install_err),
+                     "CIA read failed (0x%08lX)", res);
+            goto fail_cancel;
         }
 
-        res = FSFILE_Write(outputHandle, &bytesWritten, fileOffset, transferBuffer, bytesRead, FS_WRITE_FLUSH);
+        res = FSFILE_Write(outputHandle, &bytesWritten, fileOffset,
+                           transferBuffer, bytesRead, FS_WRITE_FLUSH);
         if (R_FAILED(res))
         {
-            printf("ERROR: Write failed (0x%08lX)\n", res);
             AM_CancelCIAInstall(outputHandle);
             FSFILE_Close(ciaFile);
             FSUSER_CloseArchive(ciaArchive);
             if (R_DESCRIPTION(res) == RD_ALREADY_EXISTS)
                 return 1; /* Already exists, that's ok */
-            return -1;
+                snprintf(g_install_err, sizeof(g_install_err),
+                         "CIA write failed (0x%08lX)", res);
+                return -1;
         }
-
-        printf("Progress: %llu / %llu\r", fileOffset, fileSize);
-        fflush(stdout);
 
         if (bytesWritten != bytesRead)
         {
-            printf("ERROR: Write mismatch\n");
-            AM_CancelCIAInstall(outputHandle);
-            FSFILE_Close(ciaFile);
-            FSUSER_CloseArchive(ciaArchive);
-            return -1;
+            snprintf(g_install_err, sizeof(g_install_err), "CIA write size mismatch");
+            goto fail_cancel;
         }
 
         fileOffset += bytesWritten;
     }
 
-    printf("\nFinishing CIA install...\n");
     res = AM_FinishCiaInstall(outputHandle);
     if (R_FAILED(res))
     {
-        printf("ERROR: Cannot finish CIA install (0x%08lX)\n", res);
-        FSFILE_Close(ciaFile);
-        FSUSER_CloseArchive(ciaArchive);
-        return -1;
+        snprintf(g_install_err, sizeof(g_install_err),
+                 "Cannot finish CIA install (0x%08lX)", res);
+        goto fail_close;
     }
 
     FSFILE_Close(ciaFile);
     FSUSER_CloseArchive(ciaArchive);
-
-    printf("CIA installed successfully!\n");
     return 1;
+
+    fail_cancel:
+    AM_CancelCIAInstall(outputHandle);
+    fail_close:
+    FSFILE_Close(ciaFile);
+    FSUSER_CloseArchive(ciaArchive);
+    return -1;
 }
 
 int main(void)
 {
-    if (!gspHasGpuRight())
-        gfxInitDefault();
-    consoleInit(GFX_TOP, NULL);
-    g_console_ready = true;
-
-    printf("Loading paths...\n");
-
     Result rc = romfsInit();
     if (R_FAILED(rc))
-        fatal_error("romfsInit failed");
+        fatal_error("romfsInit failed (0x%08lX)", rc);
 
     char core_name[CORE_NAME_MAXLEN];
     char content_path[MAX_PATH_LEN];
     char core_cia_path[MAX_PATH_LEN];
 
-    /* Read config from RomFS: just the core name (libretro_name) and the
-     * content path. Title ID and CIA path come from CORES_TABLE, generated
-     * from cores.json (see cores_table.h). */
+    /* Config from RomFS: only the core name (libretro_name) and the content
+     * path. Title ID and CIA filename come from CORES_TABLE. */
     read_core_name_from_romfs("romfs:/core.txt", core_name, sizeof(core_name));
     read_sd_path_from_romfs("romfs:/content.path", content_path, sizeof(content_path));
 
@@ -344,57 +283,44 @@ int main(void)
 
     const core_entry_t *core = lookup_core(core_name);
     if (!core)
-        fatal_error("ERROR: Unknown core '%s'\n(is cores_table.h out of date?)", core_name);
+        fatal_error("Unknown core '%s'\n(is cores_table.h out of date?)", core_name);
 
     u64 core_title_id = core->title_id;
     if (snprintf(core_cia_path, sizeof(core_cia_path), "%s%s%s",
-                 SD_PREFIX, CORES_SD_DIR, core->cia_filename) >= (int)sizeof(core_cia_path))
-        fatal_error("ERROR: CIA path too long for core '%s'", core_name);
+        SD_PREFIX, CORES_SD_DIR, core->cia_filename) >= (int)sizeof(core_cia_path))
+        fatal_error("CIA path too long for core '%s'", core_name);
 
-    printf("Core: %s\n", core_name);
-    printf("Core Title ID: 0x%016llX\n", core_title_id);
-    printf("Core CIA: %s\n", core_cia_path);
-    printf("Content: %s\n\n", content_path);
+    /* The ROM must exist before doing anything else. */
+    if (!file_exists(content_path))
+        fatal_error("ROM not found:\n%s", content_path);
 
-    /* Initialize AM (Application Manager) and FS */
-    printf("Initializing services...\n");
     if (R_FAILED(amInit()) || R_FAILED(fsInit()))
         fatal_error("Cannot initialize AM/FS services");
 
-    /* Check if core CIA is installed */
-    printf("Checking if core is installed...\n");
-    int ciaInstalled = isCiaInstalled(core_title_id, 0);
-    if (ciaInstalled == -1)
+    int coreInstalled = isCoreInstalled(core_title_id);
+    if (coreInstalled == -1)
+        fatal_error("Could not read the installed title list");
+
+    /* Already installed is not an error: skip silently. The CIA is only
+     * required (and only checked) when the core is missing. */
+    if (coreInstalled == 0)
     {
-        fatal_error("ERROR: Could not read title list");
-    }
-    else if (ciaInstalled == 0)
-    {
-        printf("Core not installed, installing...\n");
-        int installResult = installCia(core_cia_path);
-        if (installResult == -1)
-        {
-            amExit();
-            fsExit();
-            fatal_error("ERROR: CIA installation failed");
-        }
-    }
-    else
-    {
-        printf("Core already installed!\n");
+        if (!file_exists(core_cia_path))
+            fatal_error("Core CIA not found:\n%s", core_cia_path);
+
+        if (installCia(core_cia_path) == -1)
+            fatal_error("Core install failed:\n%s", g_install_err);
     }
 
-    /* Build argument buffer for RetroArch */
-    printf("Preparing arguments...\n");
+    /* Build the argument buffer for RetroArch. */
     ciaParam param;
     param.argc = 0;
     int argsLength = 0;
     char *argLocation = param.args;
 
-    /* argv[0]: "program" name (RetroArch ignores it, but it must be
-     * present: the content goes in argv[1], not argv[0] -- this matches
-     * RetroArch's original ctr/exec-3dsx/exec_cia.c. Without this "filler"
-     * argv[0], RetroArch starts up without detecting any ROM). */
+    /* argv[0]: dummy program name. It must be present: the content goes in
+     * argv[1], as in RetroArch's exec_cia.c. Without it, RetroArch starts
+     * without detecting any ROM. */
     static const char *arg0 = "retroarch";
     strcpy(argLocation, arg0);
     argLocation += strlen(arg0) + 1;
@@ -407,30 +333,16 @@ int main(void)
     argsLength += strlen(content_path) + 1;
     param.argc++;
 
-    printf("Arguments ready (argc=%lu)\n", (unsigned long)param.argc);
-
-    /* Prepare and execute the jump to the core */
-    printf("Preparing application jump to core...\n");
     Result res = APT_PrepareToDoApplicationJump(0, core_title_id, 0x1);
     if (R_FAILED(res))
-    {
-        amExit();
-        fsExit();
-        fatal_error("ERROR: Cannot prepare jump (0x%08lX)", res);
-    }
+        fatal_error("Cannot prepare jump to core (0x%08lX)", res);
 
-    printf("Executing jump to core...\n");
     res = APT_DoApplicationJump(&param, sizeof(param.argc) + argsLength, argvHmac);
     if (R_FAILED(res))
-    {
-        amExit();
-        fsExit();
-        fatal_error("ERROR: Cannot execute jump (0x%08lX)", res);
-    }
+        fatal_error("Cannot jump to core (0x%08lX)", res);
 
-    /* Should never reach here */
+    /* Should never reach here. */
     amExit();
     fsExit();
-    gfxExit();
     return 0;
 }

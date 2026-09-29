@@ -1,11 +1,19 @@
-"""build_form.py — All the fields the CLI/interactive builders ask for.
+"""build_form.py — The forwarder fields the CLI/interactive builders ask for.
 
 Mirrors ``tools/build_forwarder.parse_args`` and
-``tools/interactive_build.main`` field-for-field: core, ROM path, name,
-short/long name, manufacturer, optional audio, output path, and (tucked
-under "Advanced") the catalog/registry path overrides. This widget only
-collects and validates those fields; it never talks to SteamGridDB or
-starts a build itself.
+``tools/interactive_build.main`` field-for-field, minus the ones that now
+live elsewhere: core, ROM path, short/long name, manufacturer, optional
+audio and (tucked under "Advanced") the catalog/registry path overrides.
+The output file is chosen through the window's Save / Save As actions, and
+the Unique ID / Title ID controls live in the top bar. There is no separate
+"Name" field: the forwarder's internal identifier is its long name.
+
+This widget only collects, validates and (re)populates those fields; it
+never talks to SteamGridDB or starts a build itself. It does own the core
+catalog and the Title ID registry, so it is what can answer "which Unique
+ID would these fields get?" -- see :meth:`BuildForm.preview_unique_id`,
+which goes through the backend's read-only ``preview_unique_id()`` and so
+never writes to the registry.
 """
 
 from __future__ import annotations
@@ -27,21 +35,44 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from tools.build_forwarder import DEFAULT_MANUFACTURER, PROJECT_ROOT
+from tools.build_forwarder import DEFAULT_MANUFACTURER, normalize_sd_path
 from tools.cores_registry import DEFAULT_CORES_JSON, CoreRegistry
-from tools.title_id import DEFAULT_REGISTRY_PATH
+from tools.rom_names import suggest_title
+from tools.title_id import (
+    DEFAULT_REGISTRY_PATH,
+    ForwarderIdentity,
+    TitleIdCollisionError,
+    TitleIdRegistry,
+    preview_unique_id,
+)
+
+from ..dialogs.rom_picker import choose_rom_on_sd
 
 
 class BuildForm(QGroupBox):
     """Collects every field ``build_forwarder()`` needs, with the same defaults as the CLI."""
 
     long_name_changed = Signal(str)
+    # Any edit to the document's content (core, ROM, names, manufacturer, audio).
+    fields_changed = Signal()
+    # The core catalog or Title ID registry was swapped/reloaded, so anything
+    # derived from them (the Title ID preview) must be recomputed.
+    catalogs_changed = Signal()
 
     def __init__(self, parent=None) -> None:
         super().__init__("Forwarder details", parent)
 
         self._core_registry: CoreRegistry | None = None
         self._cores_json_path = DEFAULT_CORES_JSON
+
+        self._title_id_registry: TitleIdRegistry | None = None
+        self._title_id_registry_path = DEFAULT_REGISTRY_PATH
+        self._reload_title_id_registry()
+
+        # The title last derived from the ROM path. A name field that is still
+        # empty or equal to it has not been touched by the user, so it keeps
+        # following the ROM; one that differs is the user's and is left alone.
+        self._suggested_title = ""
 
         layout = QVBoxLayout(self)
         layout.addLayout(self._build_main_form())
@@ -56,6 +87,11 @@ class BuildForm(QGroupBox):
         self._core_combo = QComboBox()
         self._core_combo.setEditable(True)
         self._core_combo.setInsertPolicy(QComboBox.NoInsert)
+        # Size to a few characters, not to the longest core name in the
+        # catalog: otherwise the combo's width alone would push the form
+        # (and the Browse buttons under it) past the edge of the column.
+        self._core_combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self._core_combo.setMinimumContentsLength(12)
         self._reload_core_registry()
         form.addRow("Core (libretro name):", self._core_combo)
 
@@ -63,22 +99,22 @@ class BuildForm(QGroupBox):
         self._core_status_label.setStyleSheet("font-size: 8pt; color: palette(mid);")
         form.addRow("", self._core_status_label)
 
-        self._rom_edit = QLineEdit()
-        self._rom_edit.setPlaceholderText("roms/snes/Super Mario World.sfc")
-        form.addRow("ROM path (on the SD card):", self._rom_edit)
-
-        self._name_edit = QLineEdit()
-        self._name_edit.setPlaceholderText("Internal identifier, also the default output filename")
-        self._name_edit.textChanged.connect(self._on_name_changed)
-        form.addRow("Name:", self._name_edit)
+        self._rom_edit, rom_row = self._build_path_row(
+            "roms/snes/Super Mario World.sfc",
+            self._browse_rom,
+            button_text="Browse SD\u2026",
+            button_tooltip="Pick the ROM on the 3DS SD card (it must be inserted).",
+        )
+        self._rom_edit.textChanged.connect(self._autofill_names)
+        form.addRow("ROM path (on the SD card):", rom_row)
 
         self._short_name_edit = QLineEdit()
-        self._short_name_edit.setPlaceholderText("Defaults to Name")
+        self._short_name_edit.setPlaceholderText("Filled from the ROM name (empty: long name)")
         form.addRow("Short name (SMDH):", self._short_name_edit)
 
         self._long_name_edit = QLineEdit()
         self._long_name_edit.setPlaceholderText(
-            "Defaults to Name \u2014 also used as the SteamGridDB search term"
+            "Filled from the ROM name \u2014 also the SteamGridDB search term"
         )
         self._long_name_edit.textChanged.connect(self.long_name_changed)
         form.addRow("Long name (SMDH):", self._long_name_edit)
@@ -92,16 +128,28 @@ class BuildForm(QGroupBox):
         )
         form.addRow("Banner audio (optional):", audio_row)
 
-        self._output_edit, output_row = self._build_path_row(
-            "Defaults to output/<name>.cia",
-            self._browse_output,
-        )
-        form.addRow("Output .cia path:", output_row)
-
+        self._connect_change_signals()
         return form
 
+    def _connect_change_signals(self) -> None:
+        """Forward every content-bearing widget's edits as ``fields_changed``."""
+        self._core_combo.currentTextChanged.connect(self.fields_changed)
+        for edit in (
+            self._rom_edit,
+            self._short_name_edit,
+            self._long_name_edit,
+            self._manufacturer_edit,
+            self._audio_edit,
+        ):
+            edit.textChanged.connect(self.fields_changed)
+
     def _build_path_row(
-        self, hint: str, browse_slot, initial_text: str = ""
+        self,
+        hint: str,
+        browse_slot,
+        initial_text: str = "",
+        button_text: str = "Browse\u2026",
+        button_tooltip: str = "",
     ) -> tuple[QLineEdit, QWidget]:
         container = QWidget()
         row = QHBoxLayout(container)
@@ -111,7 +159,8 @@ class BuildForm(QGroupBox):
         edit.setPlaceholderText(hint)
         row.addWidget(edit, 1)
 
-        browse_button = QPushButton("Browse\u2026")
+        browse_button = QPushButton(button_text)
+        browse_button.setToolTip(button_tooltip)
         browse_button.clicked.connect(lambda: browse_slot(edit))
         row.addWidget(browse_button)
 
@@ -132,6 +181,9 @@ class BuildForm(QGroupBox):
 
         self._title_id_registry_edit, registry_row = self._build_path_row(
             "", self._browse_title_id_registry, initial_text=str(DEFAULT_REGISTRY_PATH)
+        )
+        self._title_id_registry_edit.editingFinished.connect(
+            self._on_title_id_registry_path_changed
         )
         form.addRow("Title ID registry:", registry_row)
 
@@ -160,20 +212,43 @@ class BuildForm(QGroupBox):
     def _on_cores_json_path_changed(self) -> None:
         self._cores_json_path = Path(self._cores_json_edit.text().strip() or DEFAULT_CORES_JSON)
         self._reload_core_registry()
+        self.catalogs_changed.emit()
+
+    # ── Title ID registry loading ───────────────────────────────────────
+
+    def _reload_title_id_registry(self) -> None:
+        try:
+            self._title_id_registry = TitleIdRegistry.load(self._title_id_registry_path)
+        except (OSError, ValueError):
+            # Malformed/unreadable registry: keep going with no live preview
+            # rather than crashing the form; the CLI/build path surfaces the
+            # same error properly when it actually tries to build.
+            self._title_id_registry = None
+
+    def _on_title_id_registry_path_changed(self) -> None:
+        self._title_id_registry_path = Path(
+            self._title_id_registry_edit.text().strip() or str(DEFAULT_REGISTRY_PATH)
+        )
+        self._reload_title_id_registry()
+        self.catalogs_changed.emit()
 
     # ── Browsing ─────────────────────────────────────────────────────────
+
+    def _browse_rom(self, edit: QLineEdit) -> None:
+        rom_path = choose_rom_on_sd(self)
+        if rom_path:
+            edit.setText(rom_path)
+
+    def _autofill_names(self, rom_path: str) -> None:
+        """Keep the name fields the user has not edited in sync with the ROM's file name."""
+        previous, self._suggested_title = self._suggested_title, suggest_title(rom_path)
+        for edit in (self._short_name_edit, self._long_name_edit):
+            if edit.text() in ("", previous):
+                edit.setText(self._suggested_title)
 
     def _browse_audio(self, edit: QLineEdit) -> None:
         path_str, _filter = QFileDialog.getOpenFileName(
             self, "Choose banner audio", "", "Audio files (*)"
-        )
-        if path_str:
-            edit.setText(path_str)
-
-    def _browse_output(self, edit: QLineEdit) -> None:
-        default_name = f"{self._name_edit.text().strip() or 'forwarder'}.cia"
-        path_str, _filter = QFileDialog.getSaveFileName(
-            self, "Choose output .cia", default_name, "CIA files (*.cia)"
         )
         if path_str:
             edit.setText(path_str)
@@ -192,20 +267,36 @@ class BuildForm(QGroupBox):
         )
         if path_str:
             self._title_id_registry_edit.setText(path_str)
+            self._on_title_id_registry_path_changed()
 
-    # ── Reactivity ───────────────────────────────────────────────────────
+    # ── Identity ─────────────────────────────────────────────────────────
 
-    def _on_name_changed(self, text: str) -> None:
-        if not self._output_edit.text().strip():
-            # Cosmetic only: the real default is applied by resolve_output_path()
-            # if the field is still empty at build time.
-            self._output_edit.setPlaceholderText(f"output/{text or '<name>'}.cia")
+    def _current_identity(self) -> ForwarderIdentity | None:
+        """Build a ForwarderIdentity from the current fields, or None if incomplete.
+
+        Mirrors exactly what ``build_forwarder()`` hashes -- same field
+        set, same ``normalize_sd_path()`` -- so the preview always matches
+        what an actual build would produce.
+        """
+        core = self.selected_core()
+        rom_path = self._rom_edit.text().strip()
+        name = self.long_name_text()
+        if not core or not rom_path or not name:
+            return None
+        return ForwarderIdentity(
+            name=name,
+            short_name=self._short_name_edit.text().strip() or name,
+            long_name=name,
+            manufacturer=self._manufacturer_edit.text().strip() or DEFAULT_MANUFACTURER,
+            core=core,
+            rom_path=normalize_sd_path(rom_path),
+        )
 
     # ── Public API ───────────────────────────────────────────────────────
 
     def long_name_text(self) -> str:
-        """Current long-name value, resolved the same way the CLI resolves it."""
-        return self._long_name_edit.text().strip() or self._name_edit.text().strip()
+        """Current long name, which doubles as the forwarder's internal name."""
+        return self._long_name_edit.text().strip()
 
     def selected_core(self) -> str:
         """The raw libretro core name, whether picked from the dropdown or typed.
@@ -233,27 +324,82 @@ class BuildForm(QGroupBox):
     def title_id_registry_path(self) -> Path:
         return Path(self._title_id_registry_edit.text().strip() or str(DEFAULT_REGISTRY_PATH))
 
-    def resolve_output_path(self) -> Path:
-        text = self._output_edit.text().strip()
-        if text:
-            return Path(text)
-        name = self._name_edit.text().strip() or "forwarder"
-        return PROJECT_ROOT / "output" / f"{name}.cia"
+    def preview_unique_id(
+        self, manual_unique_id: int | None, replace_existing: bool = False
+    ) -> int | None:
+        """The Unique ID a build of the current fields would use, or ``None`` if unknown.
+
+        ``None`` means the fields are incomplete or a catalog/registry could
+        not be loaded. Raises ``TitleIdCollisionError`` if ``manual_unique_id``
+        is unusable. Never writes to the registry.
+        """
+        identity = self._current_identity()
+        if identity is None or self._title_id_registry is None or self._core_registry is None:
+            return None
+        return preview_unique_id(
+            identity,
+            self._core_registry.all_unique_ids(),
+            self._title_id_registry,
+            manual_unique_id,
+            replace_existing,
+        )
+
+    def unique_id_error(
+        self, manual_unique_id: int | None, replace_existing: bool = False
+    ) -> str | None:
+        """Why ``manual_unique_id`` can't be used for the current fields, or ``None`` if it can."""
+        try:
+            self.preview_unique_id(manual_unique_id, replace_existing)
+        except TitleIdCollisionError as exc:
+            return str(exc)
+        return None
+
+    def refresh_title_id_registry(self) -> None:
+        """Re-read the registry from disk (a build just wrote to it)."""
+        self._reload_title_id_registry()
+        self.catalogs_changed.emit()
 
     def collect_fields(self) -> dict:
         """Return every field as plain strings/paths, same shape as ``ForwarderRequest``."""
-        name = self._name_edit.text().strip()
+        long_name = self.long_name_text()
         audio_text = self._audio_edit.text().strip()
         return {
             "core": self.selected_core(),
             "rom_path": self._rom_edit.text().strip(),
-            "name": name,
-            "short_name": self._short_name_edit.text().strip() or name,
-            "long_name": self.long_name_text(),
+            "name": long_name,
+            "short_name": self._short_name_edit.text().strip() or long_name,
+            "long_name": long_name,
             "manufacturer": self._manufacturer_edit.text().strip() or DEFAULT_MANUFACTURER,
             "audio": Path(audio_text) if audio_text else None,
-            "output": self.resolve_output_path(),
         }
+
+    def set_fields(
+        self,
+        core: str,
+        rom_path: str,
+        short_name: str,
+        long_name: str,
+        manufacturer: str,
+        audio: Path | None,
+    ) -> None:
+        """Fill every field, e.g. from a loaded CIA. ``fields_changed`` fires as usual."""
+        index = self._core_combo.findData(core)
+        if index >= 0:
+            self._core_combo.setCurrentIndex(index)
+        else:  # not in the catalog: show it anyway, validation will flag it
+            self._core_combo.setCurrentIndex(-1)
+            self._core_combo.setEditText(core)
+        self._rom_edit.setText(rom_path)
+        self._short_name_edit.setText(short_name)
+        self._long_name_edit.setText(long_name)
+        self._manufacturer_edit.setText(manufacturer)
+        self._audio_edit.setText(str(audio) if audio else "")
+
+    def reset(self) -> None:
+        """Back to an empty form, with the same defaults as at startup."""
+        self.set_fields("", "", "", "", DEFAULT_MANUFACTURER, None)
+        self._core_combo.setCurrentIndex(-1)
+        self._core_combo.setEditText("")
 
     def set_core_status(self, message: str) -> None:
         self._core_status_label.setText(message)

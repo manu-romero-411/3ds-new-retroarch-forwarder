@@ -55,6 +55,8 @@ class ArtworkPanel(QGroupBox):
     """SteamGridDB artwork picker: icon, hero+logo banner compositing, previews."""
 
     log_message = Signal(str)
+    # The user changed the artwork (not emitted by reset()/load_*()).
+    changed = Signal()
 
     def __init__(
         self, settings: AppSettings, long_name_provider: Callable[[], str], parent=None
@@ -330,16 +332,16 @@ class ArtworkPanel(QGroupBox):
         except OSError as exc:
             self._log(f"Could not read {path_str}: {exc}")
             return
-        self._banner_override_bytes = data
-        self._reset_banner_button.setEnabled(True)
-        self._set_banner_preview(data)
+        self._set_banner_override(data)
         self._log(f"Banner overridden with local file \u00b7 {Path(path_str).name}")
+        self.changed.emit()
 
     def _reset_banner_override(self) -> None:
         self._banner_override_bytes = None
         self._reset_banner_button.setEnabled(False)
         self._recompose_banner()
         self._log("Banner reset to the hero + logo composite.")
+        self.changed.emit()
 
     # ── Applying results ─────────────────────────────────────────────────
 
@@ -359,6 +361,7 @@ class ArtworkPanel(QGroupBox):
         elif kind == ASSET_KIND_LOGO:
             self._logo_bytes = data
             self._recompose_banner()
+        self.changed.emit()
 
     def _clear_asset(self, kind: str, slot: AssetSlot) -> None:
         slot.set_preview(None)
@@ -370,6 +373,12 @@ class ArtworkPanel(QGroupBox):
         elif kind == ASSET_KIND_LOGO:
             self._logo_bytes = None
             self._recompose_banner()
+        self.changed.emit()
+
+    def _set_banner_override(self, png_bytes: bytes) -> None:
+        self._banner_override_bytes = png_bytes
+        self._reset_banner_button.setEnabled(True)
+        self._set_banner_preview(png_bytes)
 
     def _recompose_banner(self) -> None:
         if self._banner_override_bytes is not None:
@@ -392,6 +401,30 @@ class ArtworkPanel(QGroupBox):
         )
         self._banner_preview_label.setPixmap(pixmap)
         self._banner_preview_label.setText("")
+
+    # ── Public API for the document (new / open) ────────────────────────
+
+    def reset(self) -> None:
+        """Forget every picked asset and the resolved SteamGridDB game."""
+        self._icon_bytes = None
+        self._hero_bytes = None
+        self._logo_bytes = None
+        self._banner_override_bytes = None
+        self._resolved_game = None
+        self._resolved_query = ""
+        for slot in (self._icon_slot, self._hero_slot, self._logo_slot):
+            slot.set_preview(None)
+        self._reset_banner_button.setEnabled(False)
+        self._recompose_banner()
+
+    def load_icon(self, png_bytes: bytes, source_text: str) -> None:
+        """Show ``png_bytes`` in the icon slot, as if it had been picked there."""
+        self._icon_bytes = png_bytes
+        self._icon_slot.set_preview(png_bytes, source_text)
+
+    def load_banner(self, png_bytes: bytes) -> None:
+        """Use a ready-made 256\u00d7128 banner (e.g. from a loaded CIA) as the banner override."""
+        self._set_banner_override(png_bytes)
 
     # ── Public API for the build step ───────────────────────────────────
 

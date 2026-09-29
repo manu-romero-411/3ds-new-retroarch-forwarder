@@ -24,10 +24,10 @@ per-game assets on the fly::
 from __future__ import annotations
 
 import argparse
-import struct
 import wave
-import zlib
 from pathlib import Path
+
+from tools.png_codec import encode_png
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_OUT_DIR = PROJECT_ROOT / "stub"
@@ -37,27 +37,8 @@ PLACEHOLDER_COLOR = (0x2E, 0x3A, 0x59)
 
 
 def write_png(path: Path, width: int, height: int, rgb: tuple[int, int, int]) -> None:
-    """Write a minimal, uncompressed-filter 8-bit truecolor PNG."""
-
-    def chunk(tag: bytes, data: bytes) -> bytes:
-        return (
-            struct.pack(">I", len(data))
-            + tag
-            + data
-            + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
-        )
-
-    signature = b"\x89PNG\r\n\x1a\n"
-    ihdr = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)  # 8-bit truecolor RGB
-    row = bytes([0]) + bytes(rgb) * width  # filter byte 0 + raw pixels
-    raw = row * height
-    idat = zlib.compress(raw, 9)
-
-    with path.open("wb") as handle:
-        handle.write(signature)
-        handle.write(chunk(b"IHDR", ihdr))
-        handle.write(chunk(b"IDAT", idat))
-        handle.write(chunk(b"IEND", b""))
+    """Write a solid-color 8-bit truecolor PNG."""
+    path.write_bytes(encode_png(width, height, bytes(rgb) * (width * height)))
 
 
 def write_silence_wav(

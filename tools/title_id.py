@@ -40,6 +40,24 @@ deterministic "nonce" is folded into the hash input and the search
 continues; this only changes the outcome for the game that actually
 collided, and the result is still 100% reproducible for that exact set of
 inputs plus the current registry contents.
+
+Manual overrides
+----------------
+A user may instead pick the Unique ID by hand (e.g. from the UI's live
+preview field). ``TitleIdRegistry.resolve_manual`` records that choice
+through the same registry -- so later automatic builds steer clear of it
+too -- but rejects it outright if it collides with a core CIA or a
+*different* forwarder, via ``TitleIdCollisionError``.
+
+Rebuilding an existing CIA
+--------------------------
+When an existing forwarder CIA is loaded, edited and rebuilt, it must keep
+its Title ID even though the edit changes the fields that identify it. The
+registry still remembers the *previous* identity as the owner of that ID,
+which a plain manual override would reject as "used by another forwarder".
+Passing ``replace_existing=True`` declares that the caller is deliberately
+superseding that entry: the old identity no longer describes any CIA, so it
+is dropped when the new one is recorded. Core CIA IDs stay off limits.
 """
 
 from __future__ import annotations
@@ -62,6 +80,10 @@ VARIATION_BASE = 0x00
 FORWARDER_NAMESPACE = 0xF0000
 FORWARDER_NAMESPACE_SIZE = 0x10000
 MAX_UNIQUE_ID = 0xFFFFF
+
+
+class TitleIdCollisionError(ValueError):
+    """A manually-chosen Unique ID is already taken by something else."""
 
 
 @dataclass(frozen=True)
@@ -136,6 +158,26 @@ class TitleIdRegistry:
         """Every Unique ID this registry has already handed out."""
         return set(self.by_key.values())
 
+    def preview(self, identity: ForwarderIdentity, reserved_ids: set[int]) -> int:
+        """Return the Unique ID ``identity`` would get, without assigning it.
+
+        Read-only counterpart to :meth:`resolve`: same lookup and
+        collision-search logic, but never writes to ``by_key``/``entries``
+        and never saves. Meant for a live UI preview, where the identity
+        may still be incomplete or changing on every keystroke.
+        """
+        exact_key = identity.canonical_key(nonce=0)
+        if exact_key in self.by_key:
+            return self.by_key[exact_key]
+
+        taken = reserved_ids | self.assigned_ids()
+        nonce = 0
+        while True:
+            candidate = FORWARDER_NAMESPACE | identity.digest_offset(nonce)
+            if candidate not in taken:
+                return candidate
+            nonce += 1
+
     def resolve(self, identity: ForwarderIdentity, reserved_ids: set[int]) -> int:
         """Return the Unique ID for ``identity``, assigning one if new.
 
@@ -148,27 +190,112 @@ class TitleIdRegistry:
         if exact_key in self.by_key:
             return self.by_key[exact_key]
 
-        taken = reserved_ids | self.assigned_ids()
-        nonce = 0
-        while True:
-            candidate = FORWARDER_NAMESPACE | identity.digest_offset(nonce)
-            if candidate not in taken:
-                break
-            nonce += 1
+        candidate = self.preview(identity, reserved_ids)
+        self._record(exact_key, candidate, identity, nonce=None, manual=False)
+        return candidate
 
-        record_key = identity.canonical_key(nonce=0)
-        self.by_key[record_key] = candidate
+    def validate_manual(
+        self,
+        identity: ForwarderIdentity,
+        unique_id: int,
+        reserved_ids: set[int],
+        replace_existing: bool = False,
+    ) -> None:
+        """Raise ``TitleIdCollisionError`` if ``unique_id`` is unusable for ``identity``.
+
+        Read-only counterpart to :meth:`resolve_manual`: runs the exact same
+        checks but never records anything. Meant for live UI validation of
+        a manually-typed ID, which may be incomplete or mid-edit.
+
+        With ``replace_existing`` an ID owned by a *different* forwarder in
+        this registry is accepted (see the module docstring); one reserved
+        for a core CIA is still rejected.
+        """
+        if not 0 <= unique_id <= MAX_UNIQUE_ID:
+            raise TitleIdCollisionError(
+                f"Unique ID 0x{unique_id:X} is out of range "
+                f"(0x00000-0x{MAX_UNIQUE_ID:05X})."
+            )
+
+        exact_key = identity.canonical_key(nonce=0)
+        owner_key = next(
+            (key for key, value in self.by_key.items() if value == unique_id), None
+        )
+        if owner_key is not None and owner_key != exact_key and not replace_existing:
+            raise TitleIdCollisionError(
+                f"Unique ID 0x{unique_id:05X} is already used by another forwarder "
+                "in the registry. Pick a different one."
+            )
+        if owner_key is None and unique_id in reserved_ids:
+            raise TitleIdCollisionError(
+                f"Unique ID 0x{unique_id:05X} is already used by a RetroArch "
+                "core CIA (see data/cores.json). Pick a different one."
+            )
+
+    def resolve_manual(
+        self,
+        identity: ForwarderIdentity,
+        unique_id: int,
+        reserved_ids: set[int],
+        replace_existing: bool = False,
+    ) -> int:
+        """Register a user-chosen Unique ID for ``identity``.
+
+        Unlike :meth:`resolve`, ``unique_id`` comes from the caller (e.g. a
+        UI override) instead of being derived from ``identity``'s hash.
+        Still goes through the same registry, so later automatic builds
+        steer clear of it -- but raises ``TitleIdCollisionError`` (see
+        :meth:`validate_manual`) if it is already used by a RetroArch core
+        CIA or a *different* forwarder identity. Re-submitting the same
+        identity with the same ID is a no-op (idempotent), same as
+        :meth:`resolve`.
+
+        ``replace_existing`` lets ``identity`` take over an ID currently
+        owned by another forwarder in this registry; that owner's entry is
+        removed, since the CIA it described is being replaced.
+        """
+        self.validate_manual(identity, unique_id, reserved_ids, replace_existing)
+        exact_key = identity.canonical_key(nonce=0)
+        if replace_existing:
+            self._release_other_owners(unique_id, keep_key=exact_key)
+        self._record(exact_key, unique_id, identity, nonce=None, manual=True)
+        return unique_id
+
+    def _release_other_owners(self, unique_id: int, keep_key: str) -> None:
+        """Drop every entry that owns ``unique_id`` except the one under ``keep_key``."""
+        self.by_key = {
+            key: value
+            for key, value in self.by_key.items()
+            if value != unique_id or key == keep_key
+        }
+        self.entries = [
+            entry
+            for entry in self.entries
+            if entry["unique_id"] != unique_id or entry["key"] == keep_key
+        ]
+
+    def _record(
+        self,
+        key: str,
+        unique_id: int,
+        identity: ForwarderIdentity,
+        nonce: int | None,
+        manual: bool,
+    ) -> None:
+        """Write one key -> unique_id assignment into by_key/entries (no save)."""
+        self.by_key[key] = unique_id
+        self.entries = [entry for entry in self.entries if entry["key"] != key]
         self.entries.append(
             {
-                "key": record_key,
-                "unique_id": candidate,
+                "key": key,
+                "unique_id": unique_id,
                 "name": identity.name,
                 "core": identity.core,
                 "rom_path": identity.rom_path,
                 "resolved_with_nonce": nonce,
+                "manual": manual,
             }
         )
-        return candidate
 
 
 def unique_id_to_title_id(unique_id: int) -> int:
@@ -178,17 +305,59 @@ def unique_id_to_title_id(unique_id: int) -> int:
     return (HIGH32_APPLICATION << 32) | (unique_id << 8) | VARIATION_BASE
 
 
+def title_id_to_unique_id(title_id: int) -> int:
+    """Extract the 20-bit Unique ID from a 64-bit application Title ID.
+
+    Inverse of :func:`unique_id_to_title_id`. Raises ``ValueError`` for a
+    Title ID that is not an application title (wrong ``High32``).
+    """
+    if title_id >> 32 != HIGH32_APPLICATION:
+        raise ValueError(f"not an application Title ID: 0x{title_id:016X}")
+    return (title_id >> 8) & MAX_UNIQUE_ID
+
+
+def preview_unique_id(
+    identity: ForwarderIdentity,
+    reserved_ids: set[int],
+    registry: TitleIdRegistry,
+    manual_unique_id: int | None = None,
+    replace_existing: bool = False,
+) -> int:
+    """Return the Unique ID :func:`generate_title_id` would pick, changing nothing.
+
+    Read-only counterpart to :func:`generate_title_id` (same arguments, same
+    result, but never writes to ``registry`` or saves it). Raises
+    ``TitleIdCollisionError`` if ``manual_unique_id`` is unusable. Meant for
+    live previews in a frontend.
+    """
+    if manual_unique_id is None:
+        return registry.preview(identity, reserved_ids)
+    registry.validate_manual(identity, manual_unique_id, reserved_ids, replace_existing)
+    return manual_unique_id
+
+
 def generate_title_id(
     identity: ForwarderIdentity,
     reserved_ids: set[int],
     registry: TitleIdRegistry,
+    manual_unique_id: int | None = None,
+    replace_existing: bool = False,
 ) -> tuple[int, int]:
     """Resolve ``identity`` to a ``(unique_id, title_id)`` pair.
 
     This is the single entry point other tools should call: it hides the
-    registry lookup/assignment/save dance behind one function.
+    registry lookup/assignment/save dance behind one function. Pass
+    ``manual_unique_id`` to register a user-chosen ID instead of deriving
+    one automatically; see :meth:`TitleIdRegistry.resolve_manual` for the
+    collision rules that applies, and ``replace_existing`` for rebuilding a
+    CIA under changed metadata while keeping its ID.
     """
-    unique_id = registry.resolve(identity, reserved_ids)
+    if manual_unique_id is not None:
+        unique_id = registry.resolve_manual(
+            identity, manual_unique_id, reserved_ids, replace_existing
+        )
+    else:
+        unique_id = registry.resolve(identity, reserved_ids)
     registry.save()
     return unique_id, unique_id_to_title_id(unique_id)
 
@@ -208,6 +377,56 @@ def _self_check() -> None:
     second_unique, second_title = generate_title_id(sample, set(), registry)
     assert first_unique == second_unique, "same inputs must yield the same ID"
     assert first_title == second_title
+
+    preview_only = registry.preview(sample, set())
+    assert preview_only == first_unique, "preview() must match the already-resolved ID"
+
+    other = ForwarderIdentity(
+        name="Other Game",
+        short_name="OG",
+        long_name="Other Game",
+        manufacturer="Someone",
+        core="snes9x",
+        rom_path="roms/snes/Other Game.sfc",
+    )
+    try:
+        registry.resolve_manual(other, first_unique, set())
+    except TitleIdCollisionError:
+        pass
+    else:
+        raise AssertionError("resolve_manual() must reject an ID taken by another forwarder")
+
+    assert title_id_to_unique_id(first_title) == first_unique, "inverse conversion must round-trip"
+    assert preview_unique_id(sample, set(), registry) == first_unique
+
+    edited = ForwarderIdentity(
+        name=sample.name,
+        short_name="SMW2",  # a metadata edit changes the identity...
+        long_name=sample.long_name,
+        manufacturer=sample.manufacturer,
+        core=sample.core,
+        rom_path=sample.rom_path,
+    )
+    try:
+        preview_unique_id(edited, set(), registry, first_unique)
+    except TitleIdCollisionError:
+        pass
+    else:
+        raise AssertionError("the old owner must block the ID unless it is being replaced")
+    kept, _title = generate_title_id(
+        edited, set(), registry, manual_unique_id=first_unique, replace_existing=True
+    )
+    assert kept == first_unique, "replacing must keep the Title ID"
+    assert registry.assigned_ids() == {first_unique}
+    assert len(registry.entries) == 1, "the superseded identity must be dropped"
+
+    try:
+        registry.validate_manual(edited, 0xBAC01, {0xBAC01}, replace_existing=True)
+    except TitleIdCollisionError:
+        pass
+    else:
+        raise AssertionError("core CIA IDs must stay reserved even when replacing")
+
     print(f"OK: 0x{first_unique:05X} -> 0x{first_title:016X}")
 
 

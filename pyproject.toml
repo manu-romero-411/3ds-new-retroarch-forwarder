@@ -1,5 +1,13 @@
 [tool.pylint.main]
 py-version = "3.11"
+# PySide6 is a compiled extension: without this pylint cannot see any of its
+# classes (false no-name-in-module errors on every Qt import in ui/).
+extension-pkg-allow-list = ["PySide6"]
+
+[tool.pylint.typecheck]
+# Qt signals are objects created by the binding at runtime, so pylint infers
+# ``signal.connect`` as a plain function without those members.
+generated-members = ["connect", "emit", "disconnect"]
 
 [tool.pylint.format]
 max-line-length = 100

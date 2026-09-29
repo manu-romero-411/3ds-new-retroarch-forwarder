@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from PySide6.QtGui import QFontDatabase
 from PySide6.QtWidgets import QGroupBox, QPlainTextEdit, QVBoxLayout
 
 
@@ -14,6 +15,7 @@ class LogPanel(QGroupBox):
 
         self._text_edit = QPlainTextEdit()
         self._text_edit.setReadOnly(True)
+        self._text_edit.setFont(QFontDatabase.systemFont(QFontDatabase.FixedFont))
         self._text_edit.setMaximumBlockCount(5000)
         layout.addWidget(self._text_edit)
 

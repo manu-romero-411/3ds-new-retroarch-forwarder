@@ -9,8 +9,11 @@ collision-checked Title ID (see ``tools/title_id.py``).
 Docker image (see ``tools/devkit_runtime.py``); nothing in this module
 shells out to them on the host directly.
 
-This module is the intended integration point for a future frontend: call
+This module is the integration point for frontends: call
 ``build_forwarder()`` directly instead of shelling out to this file's CLI.
+An existing forwarder CIA can be read back with
+``tools.cia_reader.read_forwarder_cia()`` (or ``--from-cia`` on the CLI) and
+rebuilt from scratch under its original Title ID.
 """
 
 from __future__ import annotations
@@ -18,9 +21,11 @@ from __future__ import annotations
 import argparse
 import shutil
 import sys
+import tempfile
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
+from tools.cia_reader import CiaReadError, LoadedForwarder, read_forwarder_cia
 from tools.cores_registry import CoreRegistry, DEFAULT_CORES_JSON
 from tools.devkit_runtime import (
     PROJECT_ROOT,
@@ -34,6 +39,7 @@ from tools.media_prep import prepare_banner_audio, prepare_banner_image, prepare
 from tools.title_id import (
     DEFAULT_REGISTRY_PATH,
     ForwarderIdentity,
+    TitleIdCollisionError,
     TitleIdRegistry,
     generate_title_id,
 )
@@ -59,6 +65,40 @@ class ForwarderRequest:
     icon: Path | None = None
     banner: Path | None = None
     audio: Path | None = None
+    manual_unique_id: int | None = None
+    # Set when rebuilding a CIA loaded from disk under its original Title
+    # ID: lets ``manual_unique_id`` take over an ID that the registry still
+    # attributes to the identity the CIA had before it was edited.
+    replace_existing_id: bool = False
+
+
+CIA_EXTENSION = ".cia"
+FALLBACK_CIA_STEM = "forwarder"
+
+
+def default_save_dir() -> Path:
+    """The user's home directory (``$HOME`` on Linux, ``%USERPROFILE%`` on Windows)."""
+    return Path.home()
+
+
+def default_cia_filename(rom_path: str) -> str:
+    """Default ``.cia`` file name for a forwarder: the ROM's basename, minus its extension.
+
+    ``rom_path`` is an SD-card path, so both ``/`` and ``\\`` separators
+    are accepted regardless of the host OS.
+    """
+    stem = PurePosixPath(rom_path.strip().replace("\\", "/")).stem
+    return f"{stem or FALLBACK_CIA_STEM}{CIA_EXTENSION}"
+
+
+def ensure_cia_extension(path: Path) -> Path:
+    """Return ``path`` ending in ``.cia``, appending it if missing.
+
+    An existing, different suffix is kept (``game.v2`` -> ``game.v2.cia``).
+    """
+    if path.suffix.lower() == CIA_EXTENSION:
+        return path
+    return path.with_name(path.name + CIA_EXTENSION)
 
 
 def normalize_sd_path(rom_path: str) -> str:
@@ -183,9 +223,17 @@ def build_forwarder(
         rom_path=clean_rom_path,
     )
     title_registry = TitleIdRegistry.load(title_id_registry_path)
-    unique_id, title_id = generate_title_id(
-        identity, core_registry.all_unique_ids(), title_registry
-    )
+    try:
+        unique_id, title_id = generate_title_id(
+            identity,
+            core_registry.all_unique_ids(),
+            title_registry,
+            manual_unique_id=request.manual_unique_id,
+            replace_existing=request.replace_existing_id,
+        )
+    except TitleIdCollisionError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        sys.exit(1)
 
     print(f"[*] Core: {request.core}")
     print(f"[*] ROM on SD: sdmc:/{clean_rom_path}")
@@ -280,13 +328,21 @@ def build_forwarder(
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse CLI arguments for standalone use."""
     parser = argparse.ArgumentParser(description="Universal CIA forwarder generator")
-    parser.add_argument("--core", required=True, help="libretro core name, as in cores.json")
-    parser.add_argument("--rom", required=True, help="ROM path on the SD card")
+    parser.add_argument(
+        "--from-cia",
+        type=Path,
+        help="Load an existing forwarder .cia and rebuild it from scratch, keeping its "
+        "Title ID. Its core, ROM path, names, manufacturer, icon, banner and audio become "
+        "the defaults; any other flag overrides the corresponding value. Unless --output "
+        "is given, the loaded file is replaced.",
+    )
+    parser.add_argument("--core", help="libretro core name, as in cores.json")
+    parser.add_argument("--rom", help="ROM path on the SD card")
     parser.add_argument(
         "--name",
-        required=True,
         help="Internal/display identifier for this forwarder "
-        "(used as the registry key and default output filename)",
+        "(used as the registry key and default output filename; "
+        "with --from-cia it defaults to the loaded long name)",
     )
     parser.add_argument(
         "--short-name", help="SMDH short description (default: --name)"
@@ -296,7 +352,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--manufacturer",
-        default=DEFAULT_MANUFACTURER,
         help=f"SMDH publisher field (default: {DEFAULT_MANUFACTURER!r})",
     )
     parser.add_argument(
@@ -314,33 +369,101 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "(default: silence; re-encoded to 16-bit/44.1kHz/stereo WAV, max 3s)",
     )
     parser.add_argument("--output", type=Path, help="Output .cia path (default: output/<name>.cia)")
+    parser.add_argument(
+        "--unique-id",
+        type=lambda value: int(value, 0),
+        help="Manually pick the Unique ID (e.g. 0xF1234) instead of deriving "
+        "one from the other fields; must not collide with a core CIA or "
+        "another forwarder already in the registry",
+    )
     parser.add_argument("--cores-json", type=Path, default=DEFAULT_CORES_JSON)
     parser.add_argument("--title-id-registry", type=Path, default=DEFAULT_REGISTRY_PATH)
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+
+    if args.from_cia is None:
+        for flag, value in (("--core", args.core), ("--rom", args.rom), ("--name", args.name)):
+            if value is None:
+                parser.error(f"{flag} is required unless --from-cia is given")
+    return args
+
+
+def load_source_cia(path: Path) -> LoadedForwarder:
+    """Read the CIA given to ``--from-cia``, reporting problems like the other CLI errors."""
+    try:
+        loaded = read_forwarder_cia(path)
+    except CiaReadError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        sys.exit(1)
+    print(f"[*] Loaded {path}")
+    print(f"    Title ID: 0x{loaded.title_id:016X}")
+    print(f"    Core: {loaded.core}")
+    print(f"    ROM on SD: sdmc:/{loaded.rom_path}")
+    for warning in loaded.warnings:
+        print(f"[!] {warning}", file=sys.stderr)
+    return loaded
+
+
+def request_from_args(
+    args: argparse.Namespace, loaded: LoadedForwarder | None, scratch_dir: Path
+) -> ForwarderRequest:
+    """Merge CLI flags over the loaded CIA (if any) into one :class:`ForwarderRequest`.
+
+    Explicit flags always win; whatever they leave unset falls back to the
+    loaded CIA and, failing that, to the usual defaults. ``scratch_dir``
+    receives the loaded CIA's icon/banner/audio as files.
+    """
+    assets = loaded.write_assets(scratch_dir) if loaded else None
+
+    def pick(flag_value, loaded_value):
+        return flag_value if flag_value is not None else loaded_value
+
+    name = pick(args.name, loaded.long_name if loaded else None)
+    if not name:
+        print(
+            "ERROR: the loaded CIA has no name in its SMDH; pass --name.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    unique_id = pick(args.unique_id, loaded.unique_id if loaded else None)
+    if args.output is not None:
+        output = args.output
+    elif loaded:
+        output = args.from_cia
+    else:
+        output = PROJECT_ROOT / "output" / f"{name}.cia"
+
+    return ForwarderRequest(
+        core=pick(args.core, loaded.core if loaded else None),
+        rom_path=pick(args.rom, loaded.rom_path if loaded else None),
+        name=name,
+        short_name=args.short_name or (loaded.short_name if loaded else "") or name,
+        long_name=args.long_name or (loaded.long_name if loaded else "") or name,
+        manufacturer=args.manufacturer
+        or (loaded.manufacturer if loaded else "")
+        or DEFAULT_MANUFACTURER,
+        output=output,
+        icon=pick(args.icon, assets.icon if assets else None),
+        banner=pick(args.banner, assets.banner if assets else None),
+        audio=pick(args.audio, assets.audio if assets else None),
+        manual_unique_id=unique_id,
+        replace_existing_id=loaded is not None and unique_id == loaded.unique_id,
+    )
 
 
 def main(argv: list[str] | None = None) -> None:
     """CLI entry point."""
     args = parse_args(argv)
-    output = args.output or (PROJECT_ROOT / "output" / f"{args.name}.cia")
+    loaded = load_source_cia(args.from_cia) if args.from_cia else None
 
-    request = ForwarderRequest(
-        core=args.core,
-        rom_path=args.rom,
-        name=args.name,
-        short_name=args.short_name or args.name,
-        long_name=args.long_name or args.name,
-        manufacturer=args.manufacturer,
-        output=output,
-        icon=args.icon,
-        banner=args.banner,
-        audio=args.audio,
-    )
-    build_forwarder(
-        request,
-        cores_json=args.cores_json,
-        title_id_registry_path=args.title_id_registry,
-    )
+    with tempfile.TemporaryDirectory(prefix="3ds_forwarder_cli_") as scratch_dir:
+        request = request_from_args(args, loaded, Path(scratch_dir))
+        if loaded and request.output == args.from_cia:
+            print(f"[*] The loaded CIA will be replaced: {request.output}")
+        build_forwarder(
+            request,
+            cores_json=args.cores_json,
+            title_id_registry_path=args.title_id_registry,
+        )
 
 
 if __name__ == "__main__":

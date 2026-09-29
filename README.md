@@ -31,10 +31,16 @@ Luma3DS/Rosalina (sin soporte para entrypoints legacy tipo *hax).
 │   ├── parse_retroarch_cores.py
 │   ├── generate_cores_table.py
 │   ├── generate_placeholder_assets.py
+│   ├── png_codec.py              # codificador PNG (solo stdlib)
+│   ├── ctr_assets.py             # decodifica icono/banner/audio de un CIA
+│   ├── cia_reader.py             # lee un forwarder .cia existente
+│   ├── sd_card.py                # detecta la SD de la 3DS y rutas relativas a ella
+│   ├── rom_names.py              # título sugerido a partir del nombre de la ROM
 │   └── build_forwarder.py        # generador por juego (backend, punto de entrada para una UI futura)
 ├── ui/                            # UI de escritorio (PySide6/Qt), ver ui/README.md
 │   ├── app.py                    # entry point (`python3 -m ui.app`)
-│   ├── main_window.py
+│   ├── main_window.py            # barra superior + flujo New/Open/Save/Save As
+│   ├── document.py               # estado del documento (fichero, Title ID, cambios)
 │   ├── settings.py
 │   ├── sgdb/                     # cliente SteamGridDB + composición hero+logo
 │   ├── dialogs/                  # diálogos modales (conflicto de juego, galería)
@@ -67,6 +73,22 @@ redimensionan siempre a 48×48 y 256×128 estirando (sin recortar); el audio
 se re-codifica siempre a PCM 16-bit / 44.1kHz / estéreo y se recorta a 3
 segundos, sea cual sea su formato de origen (usa `ffmpeg`, ya incluido en
 la imagen Docker). El `.cia` sale en `output/<name>.cia`.
+
+### Modificar un CIA existente
+
+`--from-cia` carga un forwarder ya generado (core, ruta de la ROM, nombres,
+manufacturer, icono, banner y audio) y lo **reconstruye desde cero**
+manteniendo su Title ID. Cualquier otro flag sobrescribe el valor cargado, y
+si no se pasa `--output` se reemplaza el propio fichero:
+
+```bash
+python3 -m tools.build_forwarder --from-cia output/mario.cia --long-name "Super Mario World (USA)"
+```
+
+Solo se leen CIAs generados por esta herramienta (contenido sin cifrar y
+RomFS con `core.txt`/`content.path`); cualquier otro se rechaza con un
+mensaje claro. El banner se recupera como imagen final: la composición
+original hero+logo no se puede deshacer.
 
 ### Modo interactivo
 
@@ -110,6 +132,8 @@ python3 run_ui.py
       estiramiento, y normalización del audio del banner a PCM 16-bit /
       44.1kHz / estéreo / máx. 3s, sea cual sea el formato de entrada
       (`tools/media_prep.py`, vía `ffmpeg`).
+- [x] Cargar CIAs existentes y reconstruirlos conservando su Title ID
+      (`tools/cia_reader.py`, `--from-cia` y Open/Save/Save As en la UI).
 - [x] Modo interactivo (`tools/interactive_build.py`): pide cada campo uno
       a uno y corta con error en cuanto el core no existe en el catálogo.
 - [x] Icono/banner por juego reales de tu colección: la UI (`ui/`) permite

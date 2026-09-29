@@ -14,5 +14,104 @@
     "core": "pcsx_rearmed",
     "rom_path": "roms/psx/Bust-a-Move 4 (Europe).chd",
     "resolved_with_nonce": 0
+  },
+  {
+    "key": "Ristar (USA, Europe)\u001fRistar\u001fRistar\u001fSega\u001fgenesis_plus_gx\u001froms/megadrive/Ristar (USA, Europe).zip",
+    "unique_id": 1000730,
+    "name": "Ristar (USA, Europe)",
+    "core": "genesis_plus_gx",
+    "rom_path": "roms/megadrive/Ristar (USA, Europe).zip",
+    "resolved_with_nonce": null,
+    "manual": false
+  },
+  {
+    "key": "Bust-A-Move 3 DX (Europe)\u001fBust-A-Move 99\u001fBust-A-Move 3 DX\u001fTaito\u001fgenesis_plus_gx\u001froms/psx/Bust-A-Move 3 DX (Europe).chd",
+    "unique_id": 1007157,
+    "name": "Bust-A-Move 3 DX (Europe)",
+    "core": "genesis_plus_gx",
+    "rom_path": "roms/psx/Bust-A-Move 3 DX (Europe).chd",
+    "resolved_with_nonce": null,
+    "manual": false
+  },
+  {
+    "key": "Bust-A-Move 4 (Europe)\u001fBust-A-Move 4\u001fBust-A-Move 4\u001fTaito\u001fgenesis_plus_gx\u001froms/psx/Bust-A-Move 4 (Europe).chd",
+    "unique_id": 1041713,
+    "name": "Bust-A-Move 4 (Europe)",
+    "core": "genesis_plus_gx",
+    "rom_path": "roms/psx/Bust-A-Move 4 (Europe).chd",
+    "resolved_with_nonce": null,
+    "manual": false
+  },
+  {
+    "key": "Pepsiman (Japan)\u001fPepsiman\u001fPepsiman\u001fKindle Imagine Develop\u001fgenesis_plus_gx\u001froms/psx/Pepsiman (Japan).chd",
+    "unique_id": 1021205,
+    "name": "Pepsiman (Japan)",
+    "core": "genesis_plus_gx",
+    "rom_path": "roms/psx/Pepsiman (Japan).chd",
+    "resolved_with_nonce": null,
+    "manual": false
+  },
+  {
+    "key": "Super Pang Collection (Europe)\u001fSuper Pang Collection\u001fSuper Pang Collection\u001fCapcom\u001fpcsx_rearmed\u001froms/psx/Super Pang Collection (Europe).chd",
+    "unique_id": 1029327,
+    "name": "Super Pang Collection (Europe)",
+    "core": "pcsx_rearmed",
+    "rom_path": "roms/psx/Super Pang Collection (Europe).chd",
+    "resolved_with_nonce": null,
+    "manual": false
+  },
+  {
+    "key": "Pepsiman (Japan)\u001fPepsiman\u001fPepsiman\u001fKindle Imagine Develop\u001fpcsx_rearmed\u001froms/psx/Pepsiman (Japan).chd",
+    "unique_id": 1028200,
+    "name": "Pepsiman (Japan)",
+    "core": "pcsx_rearmed",
+    "rom_path": "roms/psx/Pepsiman (Japan).chd",
+    "resolved_with_nonce": null,
+    "manual": false
+  },
+  {
+    "key": "Bust-A-Move 4 (Europe)\u001fBust-A-Move 4\u001fBust-A-Move 4\u001fTaito\u001fpcsx_rearmed\u001froms/psx/Bust-A-Move 4 (Europe).chd",
+    "unique_id": 1035698,
+    "name": "Bust-A-Move 4 (Europe)",
+    "core": "pcsx_rearmed",
+    "rom_path": "roms/psx/Bust-A-Move 4 (Europe).chd",
+    "resolved_with_nonce": null,
+    "manual": false
+  },
+  {
+    "key": "Bust-A-Move 3 DX (Europe)\u001fBust-A-Move 3 DX\u001fBust-A-Move 3 DX\u001fTaito\u001fpcsx_rearmed\u001froms/psx/Bust-A-Move 3 DX (Europe).chd",
+    "unique_id": 998779,
+    "name": "Bust-A-Move 3 DX (Europe)",
+    "core": "pcsx_rearmed",
+    "rom_path": "roms/psx/Bust-A-Move 3 DX (Europe).chd",
+    "resolved_with_nonce": null,
+    "manual": false
+  },
+  {
+    "key": "Legend of Zelda, The - A Link to the Past (USA) (Es)\u001fTLoZ - A Link to the Past\u001fThe Legend of Zelda - A Link to the Past\u001fNintendo\u001fsnes9x2005\u001froms/snes/Legend of Zelda, The - A Link to the Past (USA).zip",
+    "unique_id": 993409,
+    "name": "Legend of Zelda, The - A Link to the Past (USA) (Es)",
+    "core": "snes9x2005",
+    "rom_path": "roms/snes/Legend of Zelda, The - A Link to the Past (USA).zip",
+    "resolved_with_nonce": null,
+    "manual": false
+  },
+  {
+    "key": "Klax (USA, Europe) (Tengen)\u001fKlax MD\u001fKlax MD\u001fTengen\u001fgenesis_plus_gx\u001froms/megadrive/Klax (USA, Europe) (Tengen).zip",
+    "unique_id": 1024305,
+    "name": "Klax (USA, Europe) (Tengen)",
+    "core": "genesis_plus_gx",
+    "rom_path": "roms/megadrive/Klax (USA, Europe) (Tengen).zip",
+    "resolved_with_nonce": null,
+    "manual": false
+  },
+  {
+    "key": "Super Mario World\u001fSuper Mario World\u001fSuper Mario World\u001fNintendo\u001fsnes9x2005\u001froms/snes/Super Mario World (USA).zip",
+    "unique_id": 1046395,
+    "name": "Super Mario World",
+    "core": "snes9x2005",
+    "rom_path": "roms/snes/Super Mario World (USA).zip",
+    "resolved_with_nonce": null,
+    "manual": false
   }
 ]
