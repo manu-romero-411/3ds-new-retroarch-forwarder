@@ -35,6 +35,14 @@ from tools.devkit_runtime import (
     to_container_path,
 )
 from tools.generate_placeholder_assets import ensure_placeholder_assets
+from tools.media_catalog import (
+    MediaCatalogError,
+    list_jingles,
+    list_platform_logos,
+    resolve_jingle,
+    resolve_platform_logo,
+    validate_platform_logo,
+)
 from tools.media_prep import prepare_banner_audio, prepare_banner_image, prepare_icon
 from tools.title_id import (
     DEFAULT_REGISTRY_PATH,
@@ -65,6 +73,8 @@ class ForwarderRequest:
     icon: Path | None = None
     banner: Path | None = None
     audio: Path | None = None
+    # PNG (256x128, with transparency) drawn over the finished banner.
+    platform_logo: Path | None = None
     manual_unique_id: int | None = None
     # Set when rebuilding a CIA loaded from disk under its original Title
     # ID: lets ``manual_unique_id`` take over an ID that the registry still
@@ -107,6 +117,14 @@ def normalize_sd_path(rom_path: str) -> str:
     if clean.startswith("sdmc:/"):
         clean = clean[len("sdmc:/"):]
     return clean.lstrip("/")
+
+
+def require_valid_platform_logo(platform_logo: Path | None) -> None:
+    """Exit with a clear message if ``platform_logo`` is set but breaks the frame rules."""
+    problem = validate_platform_logo(platform_logo) if platform_logo else None
+    if problem:
+        print(f"ERROR: platform logo '{platform_logo.name}': {problem}", file=sys.stderr)
+        sys.exit(1)
 
 
 def build_stub_if_needed() -> None:
@@ -222,6 +240,8 @@ def build_forwarder(
         core=request.core,
         rom_path=clean_rom_path,
     )
+    require_valid_platform_logo(request.platform_logo)
+
     title_registry = TitleIdRegistry.load(title_id_registry_path)
     try:
         unique_id, title_id = generate_title_id(
@@ -271,7 +291,7 @@ def build_forwarder(
         banner_png = tmp_dir / "banner_256x128.png"
         audio_wav = tmp_dir / "audio_prepared.wav"
         prepare_icon(icon_source, icon_png)
-        prepare_banner_image(banner_source, banner_png)
+        prepare_banner_image(banner_source, banner_png, request.platform_logo)
         prepare_banner_audio(request.audio, audio_wav)
 
         icon_icn, banner_bnr = generate_smdh_banner(
@@ -368,6 +388,25 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Audio for the banner jingle, any format ffmpeg reads "
         "(default: silence; re-encoded to 16-bit/44.1kHz/stereo WAV, max 3s)",
     )
+    parser.add_argument(
+        "--jingle",
+        help="Banner jingle from the audio_jingles/ folder (by name) or any WAV file that "
+        "meets the rules (16-bit PCM, mono/stereo, max 3 s). Unlike --audio, nothing is "
+        "converted. Cannot be combined with --audio.",
+    )
+    parser.add_argument(
+        "--platform-logo",
+        help="Frame drawn over the banner: a name from the platform_logos/ folder or any PNG "
+        "file of exactly 256x128 pixels (with transparency).",
+    )
+    parser.add_argument(
+        "--list-jingles", action="store_true", help="List the audio_jingles/ folder and exit"
+    )
+    parser.add_argument(
+        "--list-platform-logos",
+        action="store_true",
+        help="List the platform_logos/ folder and exit",
+    )
     parser.add_argument("--output", type=Path, help="Output .cia path (default: output/<name>.cia)")
     parser.add_argument(
         "--unique-id",
@@ -380,6 +419,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--title-id-registry", type=Path, default=DEFAULT_REGISTRY_PATH)
     args = parser.parse_args(argv)
 
+    if args.list_jingles or args.list_platform_logos:
+        return args
+    if args.jingle is not None and args.audio is not None:
+        parser.error("--jingle and --audio are mutually exclusive")
     if args.from_cia is None:
         for flag, value in (("--core", args.core), ("--rom", args.rom), ("--name", args.name)):
             if value is None:
@@ -403,6 +446,29 @@ def load_source_cia(path: Path) -> LoadedForwarder:
     return loaded
 
 
+def print_catalog(title: str, entries) -> None:
+    """Print one catalog folder: usable entries by name, broken ones with the reason."""
+    print(f"{title}:")
+    for entry in entries:
+        note = "" if entry.usable else f"  [unusable: {entry.problem}]"
+        print(f"  {entry.name}{note}")
+    if not entries:
+        print("  (empty)")
+
+
+def resolve_media_args(args: argparse.Namespace) -> tuple[Path | None, Path | None]:
+    """Resolve ``--jingle`` / ``--platform-logo`` to files, exiting on a bad value."""
+    try:
+        jingle = resolve_jingle(args.jingle) if args.jingle is not None else None
+        platform_logo = (
+            resolve_platform_logo(args.platform_logo) if args.platform_logo is not None else None
+        )
+    except MediaCatalogError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        sys.exit(1)
+    return jingle, platform_logo
+
+
 def request_from_args(
     args: argparse.Namespace, loaded: LoadedForwarder | None, scratch_dir: Path
 ) -> ForwarderRequest:
@@ -417,6 +483,7 @@ def request_from_args(
     def pick(flag_value, loaded_value):
         return flag_value if flag_value is not None else loaded_value
 
+    jingle, platform_logo = resolve_media_args(args)
     name = pick(args.name, loaded.long_name if loaded else None)
     if not name:
         print(
@@ -444,7 +511,8 @@ def request_from_args(
         output=output,
         icon=pick(args.icon, assets.icon if assets else None),
         banner=pick(args.banner, assets.banner if assets else None),
-        audio=pick(args.audio, assets.audio if assets else None),
+        audio=pick(jingle or args.audio, assets.audio if assets else None),
+        platform_logo=platform_logo,
         manual_unique_id=unique_id,
         replace_existing_id=loaded is not None and unique_id == loaded.unique_id,
     )
@@ -453,6 +521,12 @@ def request_from_args(
 def main(argv: list[str] | None = None) -> None:
     """CLI entry point."""
     args = parse_args(argv)
+    if args.list_jingles or args.list_platform_logos:
+        if args.list_jingles:
+            print_catalog("Jingles", list_jingles())
+        if args.list_platform_logos:
+            print_catalog("Platform logos", list_platform_logos())
+        return
     loaded = load_source_cia(args.from_cia) if args.from_cia else None
 
     with tempfile.TemporaryDirectory(prefix="3ds_forwarder_cli_") as scratch_dir:

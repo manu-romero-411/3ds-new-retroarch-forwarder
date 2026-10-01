@@ -1,8 +1,8 @@
 # Forwarder Builder UI
 
 A PySide6 (Qt) frontend over the existing `tools/build_forwarder.py`
-backend. It exposes the same fields as the CLI/interactive builders
-(`tools/build_forwarder.py`, `tools/interactive_build.py`) as a form, plus
+backend. It exposes the same fields as the CLI
+(`tools/build_forwarder.py`) as a form, plus
 an artwork picker backed by the [SteamGridDB](https://www.steamgriddb.com/)
 API for the icon and the banner.
 
@@ -43,7 +43,22 @@ docker run --rm -v "$(pwd)":/work -e DISPLAY="$DISPLAY" \
 
 Running the UI directly on the host (outside Docker) works too, as long as
 `makerom`/`bannertool`/`ffmpeg` are on `PATH` when you actually click
-"Build .cia".
+"Save".
+
+## Layout
+
+The window has two panes. On the left (scrolls if the window is short): the
+forwarder fields, then the artwork controls. On the right, always in view: a
+**console preview**, a picture of a 3DS whose top screen shows the banner
+(platform logo included, centred on white) and whose bottom screen shows a
+made-up HOME menu icon grid, two rows high, with your icon highlighted among
+empty tiles. It updates as you edit and shows exactly what will be built,
+including the placeholders used when no icon or banner has been chosen. The
+screens are composed at the picture's native size, where its holes are exactly
+400x240 and 320x240 (`ui/assets/3ds_frame.png`), and only scaled down for display.
+
+Because of that preview, the artwork slots have no thumbnails of their own.
+The window cannot shrink below about 670 px wide.
 
 ## Workflow
 
@@ -57,11 +72,17 @@ name, or "Creating new CIA…" for a document that has none yet.
    manufacturer and optional banner audio. These map 1:1 onto
    `build_forwarder`'s `--core`/`--rom`/`--short-name`/... flags. There is no
    separate "name" field: the **long name** is the forwarder's identifier.
+   **Banner jingle** is a drop-down of the `.wav` files in `audio_jingles/`
+   (plus "Silence" and "Browse for a file…" for your own; see that folder's
+   README for the rules). The list is re-read each time it opens, and files
+   that break the rules appear greyed out with the reason as a tooltip. The
+   button next to it plays the selected jingle (and stops it); if the computer
+   has no usable audio output the log says so.
    **Browse SD…** picks the ROM on an inserted 3DS SD card and fills in its
    path relative to the card's root. Both name fields are filled from the ROM's
    file name (extension and `(...)`/`[...]` tags removed) until you edit them.
    The core field autocompletes against `data/cores.json` and is validated
-   before a save starts, exactly like `interactive_build.py` does.
+   before a save starts.
 2. The **Title ID** in the top bar updates live from those fields. Untick
    **Auto** to type a Unique ID by hand; a value that collides with a core
    CIA or another forwarder is flagged and blocks saving. On narrow windows
@@ -81,14 +102,16 @@ name, or "Creating new CIA…" for a document that has none yet.
    lower-quality preview (SteamGridDB's own thumbnail rendition, not the
    full asset) so the gallery loads quickly; clicking a tile downloads the
    full asset and applies it.
-6. The **Composed banner preview** always reflects the current Hero +
-   Logo: the hero is cover-cropped to 256x128 as the background, and the
-   logo is pasted on top of it (scaled down, alpha-blended), so the logo
-   sits in front of / above the hero. Either can be missing. You can also
-   bypass this entirely with "Use a local banner file instead...".
+6. The banner is the Hero cover-cropped to 256x128 with the Logo pasted on top
+   (scaled down, alpha-blended). Either can be missing. Under **Banner** you can
+   skip that with "Use local banner file…" (and undo it with "Reset to
+   composite"), and pick a **Platform logo**: a drop-down of the `.png` files in
+   `platform_logos/` (256x128, with transparency, drawn over the banner), also
+   with "None" and "Browse for a file…". The preview shows the result; the build
+   itself draws the frame (`tools/media_prep.py`), so the CLI gets the same.
 7. Any of the three slots can also be filled from a local file instead of
-   SteamGridDB ("Browse local file...") — useful for artwork you already
-   have.
+   SteamGridDB ("Browse…") — useful for artwork you already have. Each slot
+   captions where its current image came from.
 8. **Save** builds the `.cia`. Progress and any errors from
    `build_forwarder()` stream into the (monospaced) log panel in real time.
 
@@ -108,6 +131,9 @@ name, or "Creating new CIA…" for a document that has none yet.
   as a *local banner override*, because the original hero/logo composition
   can't be recovered from the finished image; use "Reset to composite" or
   Clear to discard it.
+- A loaded CIA's jingle shows up as "From the CIA". Its platform frame, if it
+  had one, is already part of the loaded banner image and cannot be told apart,
+  so the Platform logo starts at "None"; picking one draws it on top of that.
 - Once a document has a file, its Unique ID stays pinned to that file. Tick
   **Auto** to derive a fresh one from the fields instead.
 

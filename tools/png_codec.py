@@ -10,10 +10,12 @@ from __future__ import annotations
 
 import struct
 import zlib
+from pathlib import Path
 
 _PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 _COLOR_TYPE_RGB = 2
 _COLOR_TYPE_RGBA = 6
+_IHDR_END = 24  # signature (8) + chunk header (8) + width/height (8)
 
 
 def _chunk(tag: bytes, data: bytes) -> bytes:
@@ -53,3 +55,17 @@ def encode_png(width: int, height: int, pixels: bytes, has_alpha: bool = False) 
         + _chunk(b"IDAT", zlib.compress(raw, 9))
         + _chunk(b"IEND", b"")
     )
+
+
+def png_dimensions(path: Path) -> tuple[int, int]:
+    """Return ``(width, height)`` of the PNG at ``path`` without decoding it.
+
+    Raises ``ValueError`` if the file is not a PNG, ``OSError`` if it cannot
+    be read.
+    """
+    with path.open("rb") as handle:
+        header = handle.read(_IHDR_END)
+    if len(header) < _IHDR_END or header[:8] != _PNG_SIGNATURE or header[12:16] != b"IHDR":
+        raise ValueError("not a PNG file")
+    width, height = struct.unpack(">II", header[16:_IHDR_END])
+    return width, height

@@ -34,6 +34,7 @@ Luma3DS/Rosalina (sin soporte para entrypoints legacy tipo *hax).
 │   ├── png_codec.py              # codificador PNG (solo stdlib)
 │   ├── ctr_assets.py             # decodifica icono/banner/audio de un CIA
 │   ├── cia_reader.py             # lee un forwarder .cia existente
+│   ├── media_catalog.py          # catálogo y reglas de jingles/logos de plataforma
 │   ├── sd_card.py                # detecta la SD de la 3DS y rutas relativas a ella
 │   ├── rom_names.py              # título sugerido a partir del nombre de la ROM
 │   └── build_forwarder.py        # generador por juego (backend, punto de entrada para una UI futura)
@@ -41,6 +42,8 @@ Luma3DS/Rosalina (sin soporte para entrypoints legacy tipo *hax).
 │   ├── app.py                    # entry point (`python3 -m ui.app`)
 │   ├── main_window.py            # barra superior + flujo New/Open/Save/Save As
 │   ├── document.py               # estado del documento (fichero, Title ID, cambios)
+│   ├── jingle_player.py          # reproduce el jingle seleccionado (QtMultimedia)
+│   ├── assets/3ds_frame.png      # marco de la 3DS para la vista previa
 │   ├── settings.py
 │   ├── sgdb/                     # cliente SteamGridDB + composición hero+logo
 │   ├── dialogs/                  # diálogos modales (conflicto de juego, galería)
@@ -74,6 +77,27 @@ se re-codifica siempre a PCM 16-bit / 44.1kHz / estéreo y se recorta a 3
 segundos, sea cual sea su formato de origen (usa `ffmpeg`, ya incluido en
 la imagen Docker). El `.cia` sale en `output/<name>.cia`.
 
+### Jingles y logos de plataforma
+
+Dos carpetas en la raíz del proyecto sirven para dar personalidad al acceso
+directo (cada una tiene un `README.md` con las reglas):
+
+- `audio_jingles/`: ficheros `.wav` con la melodía que suena al seleccionar el
+  icono en el menú HOME. Reglas: WAV PCM de 16 bits, mono o estéreo, 3 s como
+  máximo.
+- `platform_logos/`: ficheros `.png` de **256x128** con transparencia, que se
+  dibujan **encima del banner ya compuesto** (logo de la consola, marco...).
+
+```bash
+python3 -m tools.build_forwarder --list-jingles --list-platform-logos
+python3 -m tools.build_forwarder ... --jingle "Mi melodia" --platform-logo snes
+```
+
+`--jingle` y `--platform-logo` aceptan un nombre de la carpeta (sin extensión)
+o la ruta a cualquier fichero que cumpla las reglas. `--jingle` no convierte
+nada y es incompatible con `--audio`, que sigue aceptando cualquier formato de
+ffmpeg. Un fichero que incumple las reglas sale en las listas con el motivo.
+
 ### Modificar un CIA existente
 
 `--from-cia` carga un forwarder ya generado (core, ruta de la ROM, nombres,
@@ -90,25 +114,13 @@ RomFS con `core.txt`/`content.path`); cualquier otro se rechaza con un
 mensaje claro. El banner se recupera como imagen final: la composición
 original hero+logo no se puede deshacer.
 
-### Modo interactivo
-
-Si prefieres que te vaya preguntando campo a campo (y cortando al momento
-si el core no existe en el catálogo, antes de pedirte nada más):
-
-```bash
-docker run --rm -v "$(pwd)":/work -it 3ds-forwarder-builder \
-  python3 -m tools.interactive_build
-```
-
-Las rutas de icono/banner/audio son opcionales (Enter en blanco = usar el
-valor por defecto) y, si las das, también se validan que el fichero
-exista antes de seguir.
-
 ### UI gráfica (PySide6/Qt)
 
 También hay una UI de escritorio en `ui/` con los mismos campos que la CLI,
 más un buscador de artwork contra SteamGridDB (icono, hero y logo, con
-composición automática del banner y previsualización). Documentación
+composición automática del banner) y una vista previa en vivo sobre una
+3DS: el banner en la pantalla superior y el icono en una cuadrícula del menú
+HOME en la inferior. Documentación
 completa (instalación, flujo de uso) en `ui/README.md`; arranque rápido:
 
 ```bash
@@ -134,8 +146,6 @@ python3 run_ui.py
       (`tools/media_prep.py`, vía `ffmpeg`).
 - [x] Cargar CIAs existentes y reconstruirlos conservando su Title ID
       (`tools/cia_reader.py`, `--from-cia` y Open/Save/Save As en la UI).
-- [x] Modo interactivo (`tools/interactive_build.py`): pide cada campo uno
-      a uno y corta con error en cuanto el core no existe en el catálogo.
 - [x] Icono/banner por juego reales de tu colección: la UI (`ui/`) permite
       buscarlos en SteamGridDB (icono, hero y logo por separado) o
       cargarlos desde un fichero local; si no se elige ninguno, se sigue

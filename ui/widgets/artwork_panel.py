@@ -17,12 +17,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Callable
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QPixmap
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QFileDialog,
     QGroupBox,
+    QHBoxLayout,
     QLabel,
     QLineEdit,
     QPushButton,
@@ -30,11 +30,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from tools.media_catalog import PLATFORM_LOGO_RULES, list_platform_logos, validate_platform_logo
+
 from ..dialogs.game_picker_dialog import GamePickerDialog
 from ..dialogs.image_gallery_dialog import ImageGalleryDialog
 from ..settings import AppSettings
 from ..sgdb.client import SGDBClient
-from ..sgdb.compositor import compose_banner_png_bytes
+from ..sgdb.compositor import compose_banner_png_bytes, frame_png_bytes
 from ..sgdb.downloader import download_bytes
 from ..sgdb.models import (
     ASSET_KIND_HERO,
@@ -45,10 +47,10 @@ from ..sgdb.models import (
     ImageCandidate,
 )
 from ..workers.task_thread import TaskThread
+from .asset_choice import AssetChoice
 from .asset_slot import AssetSlot
 
 IMAGE_FILE_FILTER = "Images (*.png *.jpg *.jpeg *.bmp *.webp);;All files (*)"
-BANNER_PREVIEW_SIZE = (240, 120)
 
 
 class ArtworkPanel(QGroupBox):
@@ -57,6 +59,9 @@ class ArtworkPanel(QGroupBox):
     log_message = Signal(str)
     # The user changed the artwork (not emitted by reset()/load_*()).
     changed = Signal()
+    # The icon and the banner as they will be built (``bytes`` or ``None``),
+    # platform frame included, for whoever previews them.
+    previews_changed = Signal(object, object)
 
     def __init__(
         self, settings: AppSettings, long_name_provider: Callable[[], str], parent=None
@@ -70,6 +75,9 @@ class ArtworkPanel(QGroupBox):
         self._hero_bytes: bytes | None = None
         self._logo_bytes: bytes | None = None
         self._banner_override_bytes: bytes | None = None
+        # The platform frame's pixels, for the preview only: the build gets
+        # the frame's *path* (see platform_logo_path) and draws it itself.
+        self._frame_bytes: bytes | None = None
 
         self._resolved_game: GameCandidate | None = None
         self._resolved_query: str = ""
@@ -83,8 +91,8 @@ class ArtworkPanel(QGroupBox):
         self._icon_slot: AssetSlot
         self._hero_slot: AssetSlot
         self._logo_slot: AssetSlot
-        self._banner_preview_label: QLabel
         self._reset_banner_button: QPushButton
+        self._frame_choice: AssetChoice
 
         self._build_ui()
         self._load_settings()
@@ -97,8 +105,7 @@ class ArtworkPanel(QGroupBox):
         layout.addLayout(self._build_api_key_row())
 
         # Slots stack vertically (rather than side by side) so this whole
-        # panel stays narrow and can sit as a fixed-width column next to
-        # the form instead of forcing the window to grow wide.
+        # panel stays narrow enough to sit as a column next to the form.
         slots_column = QVBoxLayout()
         self._icon_slot = self._build_slot(
             slots_column,
@@ -120,7 +127,7 @@ class ArtworkPanel(QGroupBox):
         )
 
         layout.addLayout(slots_column)
-        layout.addWidget(self._build_banner_preview_box())
+        layout.addWidget(self._build_banner_box())
 
     def _build_slot(self, column: QVBoxLayout, kind: str, title: str, hint: str) -> AssetSlot:
         """Build one AssetSlot and wire its three actions to this kind of asset."""
@@ -131,46 +138,51 @@ class ArtworkPanel(QGroupBox):
         column.addWidget(slot)
         return slot
 
-    def _build_api_key_row(self) -> QVBoxLayout:
-        # Stacked (label / field / checkbox) rather than one wide row, so
-        # this fits a narrow column instead of forcing it wider.
-        column = QVBoxLayout()
-        column.addWidget(QLabel("SteamGridDB API key:"))
+    def _build_api_key_row(self) -> QHBoxLayout:
+        row = QHBoxLayout()
+        row.addWidget(QLabel("API key:"))
 
         self._api_key_edit = QLineEdit()
         self._api_key_edit.setEchoMode(QLineEdit.Password)
-        self._api_key_edit.setPlaceholderText("Paste your API key\u2026")
+        self._api_key_edit.setPlaceholderText("SteamGridDB API key\u2026")
         self._api_key_edit.textChanged.connect(self._on_api_key_changed)
-        column.addWidget(self._api_key_edit)
+        row.addWidget(self._api_key_edit, 1)
 
         self._remember_key_check = QCheckBox("Remember")
         self._remember_key_check.toggled.connect(self._on_remember_toggled)
-        column.addWidget(self._remember_key_check)
+        row.addWidget(self._remember_key_check)
+        return row
 
-        return column
-
-    def _build_banner_preview_box(self) -> QWidget:
-        box = QGroupBox("Composed banner preview (256\u00d7128)")
+    def _build_banner_box(self) -> QWidget:
+        """Banner-wide options: the platform frame and a ready-made banner file."""
+        box = QGroupBox("Banner")
         layout = QVBoxLayout(box)
 
-        self._banner_preview_label = QLabel("No hero or logo selected yet.")
-        self._banner_preview_label.setAlignment(Qt.AlignCenter)
-        self._banner_preview_label.setFixedSize(*BANNER_PREVIEW_SIZE)
-        self._banner_preview_label.setStyleSheet(
-            "border: 1px dashed palette(mid); color: palette(mid);"
+        frame_row = QHBoxLayout()
+        frame_row.addWidget(QLabel("Platform logo:"))
+        self._frame_choice = AssetChoice(
+            none_label="None",
+            list_entries=list_platform_logos,
+            validate=validate_platform_logo,
+            dialog_title="Choose a platform logo",
+            file_filter="PNG images (*.png)",
+            rules=PLATFORM_LOGO_RULES,
         )
-        layout.addWidget(self._banner_preview_label, alignment=Qt.AlignHCenter)
+        self._frame_choice.changed.connect(self._on_frame_changed)
+        frame_row.addWidget(self._frame_choice, 1)
+        layout.addLayout(frame_row)
 
-        button_column = QVBoxLayout()
-        override_button = QPushButton("Use local file instead\u2026")
+        button_row = QHBoxLayout()
+        override_button = QPushButton("Use local banner file\u2026")
+        override_button.setToolTip("Use a ready-made image instead of the hero + logo composite.")
         override_button.clicked.connect(self._browse_banner_override)
-        button_column.addWidget(override_button)
+        button_row.addWidget(override_button)
 
         self._reset_banner_button = QPushButton("Reset to composite")
         self._reset_banner_button.clicked.connect(self._reset_banner_override)
         self._reset_banner_button.setEnabled(False)
-        button_column.addWidget(self._reset_banner_button)
-        layout.addLayout(button_column)
+        button_row.addWidget(self._reset_banner_button)
+        layout.addLayout(button_row)
 
         return box
 
@@ -339,7 +351,7 @@ class ArtworkPanel(QGroupBox):
     def _reset_banner_override(self) -> None:
         self._banner_override_bytes = None
         self._reset_banner_button.setEnabled(False)
-        self._recompose_banner()
+        self._refresh_previews()
         self._log("Banner reset to the hero + logo composite.")
         self.changed.emit()
 
@@ -352,55 +364,56 @@ class ArtworkPanel(QGroupBox):
             self._log("Download failed: the file could not be retrieved.")
             return
 
-        slot.set_preview(data, source_text)
+        slot.set_source(source_text)
+        self._store_asset(kind, data)
+        self._refresh_previews()
+        self.changed.emit()
+
+    def _clear_asset(self, kind: str, slot: AssetSlot) -> None:
+        slot.set_source()
+        self._store_asset(kind, None)
+        self._refresh_previews()
+        self.changed.emit()
+
+    def _store_asset(self, kind: str, data: bytes | None) -> None:
         if kind == ASSET_KIND_ICON:
             self._icon_bytes = data
         elif kind == ASSET_KIND_HERO:
             self._hero_bytes = data
-            self._recompose_banner()
         elif kind == ASSET_KIND_LOGO:
             self._logo_bytes = data
-            self._recompose_banner()
-        self.changed.emit()
-
-    def _clear_asset(self, kind: str, slot: AssetSlot) -> None:
-        slot.set_preview(None)
-        if kind == ASSET_KIND_ICON:
-            self._icon_bytes = None
-        elif kind == ASSET_KIND_HERO:
-            self._hero_bytes = None
-            self._recompose_banner()
-        elif kind == ASSET_KIND_LOGO:
-            self._logo_bytes = None
-            self._recompose_banner()
-        self.changed.emit()
 
     def _set_banner_override(self, png_bytes: bytes) -> None:
         self._banner_override_bytes = png_bytes
         self._reset_banner_button.setEnabled(True)
-        self._set_banner_preview(png_bytes)
+        self._refresh_previews()
 
-    def _recompose_banner(self) -> None:
-        if self._banner_override_bytes is not None:
-            return
-        if self._hero_bytes is None and self._logo_bytes is None:
-            self._banner_preview_label.setPixmap(QPixmap())
-            self._banner_preview_label.setText("No hero or logo selected yet.")
-            return
-        png_bytes = compose_banner_png_bytes(self._hero_bytes, self._logo_bytes)
-        self._set_banner_preview(png_bytes)
+    def current_previews(self) -> tuple[bytes | None, bytes]:
+        """The icon (``None``: the placeholder) and banner as they will be built.
 
-    def _set_banner_preview(self, png_bytes: bytes) -> None:
-        pixmap = QPixmap()
-        pixmap.loadFromData(png_bytes)
-        pixmap = pixmap.scaled(
-            BANNER_PREVIEW_SIZE[0],
-            BANNER_PREVIEW_SIZE[1],
-            Qt.KeepAspectRatio,
-            Qt.SmoothTransformation,
-        )
-        self._banner_preview_label.setPixmap(pixmap)
-        self._banner_preview_label.setText("")
+        The banner is the override or the hero + logo composite -- a plain
+        placeholder when neither exists -- with the platform frame drawn over it.
+        """
+        banner = self._banner_override_bytes
+        if banner is None:
+            banner = compose_banner_png_bytes(self._hero_bytes, self._logo_bytes)
+        if self._frame_bytes:
+            banner = frame_png_bytes(banner, self._frame_bytes)
+        return self._icon_bytes, banner
+
+    def _refresh_previews(self) -> None:
+        self.previews_changed.emit(*self.current_previews())
+
+    def _on_frame_changed(self) -> None:
+        path = self._frame_choice.selected_path()
+        self._frame_bytes = None
+        if path is not None:
+            try:
+                self._frame_bytes = path.read_bytes()
+            except OSError as exc:
+                self._log(f"Could not read {path}: {exc}")
+        self._refresh_previews()
+        self.changed.emit()
 
     # ── Public API for the document (new / open) ────────────────────────
 
@@ -410,17 +423,20 @@ class ArtworkPanel(QGroupBox):
         self._hero_bytes = None
         self._logo_bytes = None
         self._banner_override_bytes = None
+        self._frame_bytes = None
+        self._frame_choice.select_path(None)
         self._resolved_game = None
         self._resolved_query = ""
         for slot in (self._icon_slot, self._hero_slot, self._logo_slot):
-            slot.set_preview(None)
+            slot.set_source()
         self._reset_banner_button.setEnabled(False)
-        self._recompose_banner()
+        self._refresh_previews()
 
     def load_icon(self, png_bytes: bytes, source_text: str) -> None:
         """Show ``png_bytes`` in the icon slot, as if it had been picked there."""
         self._icon_bytes = png_bytes
-        self._icon_slot.set_preview(png_bytes, source_text)
+        self._icon_slot.set_source(source_text)
+        self._refresh_previews()
 
     def load_banner(self, png_bytes: bytes) -> None:
         """Use a ready-made 256\u00d7128 banner (e.g. from a loaded CIA) as the banner override."""
@@ -428,8 +444,12 @@ class ArtworkPanel(QGroupBox):
 
     # ── Public API for the build step ───────────────────────────────────
 
+    def platform_logo_path(self) -> Path | None:
+        """The chosen platform frame, or ``None``. The build draws it over the banner."""
+        return self._frame_choice.selected_path()
+
     def final_banner_bytes(self) -> bytes | None:
-        """The banner to actually build: manual override, composite, or ``None``."""
+        """The banner to build, *without* the platform frame: override, composite or ``None``."""
         if self._banner_override_bytes is not None:
             return self._banner_override_bytes
         if self._hero_bytes is None and self._logo_bytes is None:

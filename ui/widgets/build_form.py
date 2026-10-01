@@ -1,9 +1,9 @@
-"""build_form.py — The forwarder fields the CLI/interactive builders ask for.
+"""build_form.py — The forwarder fields the CLI asks for.
 
-Mirrors ``tools/build_forwarder.parse_args`` and
-``tools/interactive_build.main`` field-for-field, minus the ones that now
-live elsewhere: core, ROM path, short/long name, manufacturer, optional
-audio and (tucked under "Advanced") the catalog/registry path overrides.
+Mirrors ``tools/build_forwarder.parse_args`` field-for-field, minus the ones
+that now live elsewhere: core, ROM path, short/long name, manufacturer, the
+banner jingle and (tucked under "Advanced") the catalog/registry path
+overrides.
 The output file is chosen through the window's Save / Save As actions, and
 the Unique ID / Title ID controls live in the top bar. There is no separate
 "Name" field: the forwarder's internal identifier is its long name.
@@ -31,12 +31,15 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
+    QStyle,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
 from tools.build_forwarder import DEFAULT_MANUFACTURER, normalize_sd_path
 from tools.cores_registry import DEFAULT_CORES_JSON, CoreRegistry
+from tools.media_catalog import JINGLE_RULES, list_jingles, validate_jingle
 from tools.rom_names import suggest_title
 from tools.title_id import (
     DEFAULT_REGISTRY_PATH,
@@ -47,12 +50,16 @@ from tools.title_id import (
 )
 
 from ..dialogs.rom_picker import choose_rom_on_sd
+from ..jingle_player import JinglePlayer
+from .asset_choice import AssetChoice
 
 
 class BuildForm(QGroupBox):
     """Collects every field ``build_forwarder()`` needs, with the same defaults as the CLI."""
 
     long_name_changed = Signal(str)
+    # Something worth telling the user, for the window's log.
+    log_message = Signal(str)
     # Any edit to the document's content (core, ROM, names, manufacturer, audio).
     fields_changed = Signal()
     # The core catalog or Title ID registry was swapped/reloaded, so anything
@@ -73,6 +80,10 @@ class BuildForm(QGroupBox):
         # empty or equal to it has not been touched by the user, so it keeps
         # following the ROM; one that differs is the user's and is left alone.
         self._suggested_title = ""
+
+        # Created by _build_jingle_row(); declared here so they exist from construction.
+        self._jingle_player: JinglePlayer
+        self._play_button: QToolButton
 
         layout = QVBoxLayout(self)
         layout.addLayout(self._build_main_form())
@@ -122,14 +133,55 @@ class BuildForm(QGroupBox):
         self._manufacturer_edit = QLineEdit(DEFAULT_MANUFACTURER)
         form.addRow("Manufacturer (SMDH):", self._manufacturer_edit)
 
-        self._audio_edit, audio_row = self._build_path_row(
-            "Any ffmpeg-readable format; re-encoded and trimmed to 3s (default: silence)",
-            self._browse_audio,
+        self._jingle_choice = AssetChoice(
+            none_label="Silence (default)",
+            list_entries=list_jingles,
+            validate=validate_jingle,
+            dialog_title="Choose a banner jingle",
+            file_filter="WAV files (*.wav)",
+            rules=JINGLE_RULES,
         )
-        form.addRow("Banner audio (optional):", audio_row)
+        form.addRow("Banner jingle:", self._build_jingle_row())
 
         self._connect_change_signals()
         return form
+
+    def _build_jingle_row(self) -> QWidget:
+        """The jingle drop-down with a play/stop button next to it."""
+        self._jingle_player = JinglePlayer(self)
+        self._jingle_player.playing_changed.connect(self._update_play_button)
+        self._jingle_player.failed.connect(self.log_message)
+
+        self._play_button = QToolButton()
+        self._play_button.clicked.connect(self._toggle_jingle)
+
+        row = QWidget()
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self._jingle_choice, 1)
+        layout.addWidget(self._play_button)
+        self._update_play_button(False)
+        return row
+
+    def _update_play_button(self, playing: bool) -> None:
+        """Show stop while a jingle sounds, play otherwise; only usable with a jingle chosen."""
+        icon = QStyle.SP_MediaStop if playing else QStyle.SP_MediaPlay
+        self._play_button.setIcon(self.style().standardIcon(icon))
+        self._play_button.setToolTip("Stop the jingle" if playing else "Play the jingle")
+        self._play_button.setEnabled(playing or self._jingle_choice.selected_path() is not None)
+
+    def _toggle_jingle(self) -> None:
+        path = self._jingle_choice.selected_path()
+        if self._jingle_player.is_playing or path is None:
+            self._jingle_player.stop()
+        else:
+            self._jingle_player.play(path)
+
+    def _on_jingle_changed(self) -> None:
+        """A different jingle (or none) was chosen: silence the old one and tell the form."""
+        self._jingle_player.stop()
+        self._update_play_button(False)
+        self.fields_changed.emit()
 
     def _connect_change_signals(self) -> None:
         """Forward every content-bearing widget's edits as ``fields_changed``."""
@@ -139,9 +191,9 @@ class BuildForm(QGroupBox):
             self._short_name_edit,
             self._long_name_edit,
             self._manufacturer_edit,
-            self._audio_edit,
         ):
             edit.textChanged.connect(self.fields_changed)
+        self._jingle_choice.changed.connect(self._on_jingle_changed)
 
     def _build_path_row(
         self,
@@ -245,13 +297,6 @@ class BuildForm(QGroupBox):
         for edit in (self._short_name_edit, self._long_name_edit):
             if edit.text() in ("", previous):
                 edit.setText(self._suggested_title)
-
-    def _browse_audio(self, edit: QLineEdit) -> None:
-        path_str, _filter = QFileDialog.getOpenFileName(
-            self, "Choose banner audio", "", "Audio files (*)"
-        )
-        if path_str:
-            edit.setText(path_str)
 
     def _browse_cores_json(self) -> None:
         path_str, _filter = QFileDialog.getOpenFileName(
@@ -362,7 +407,6 @@ class BuildForm(QGroupBox):
     def collect_fields(self) -> dict:
         """Return every field as plain strings/paths, same shape as ``ForwarderRequest``."""
         long_name = self.long_name_text()
-        audio_text = self._audio_edit.text().strip()
         return {
             "core": self.selected_core(),
             "rom_path": self._rom_edit.text().strip(),
@@ -370,7 +414,7 @@ class BuildForm(QGroupBox):
             "short_name": self._short_name_edit.text().strip() or long_name,
             "long_name": long_name,
             "manufacturer": self._manufacturer_edit.text().strip() or DEFAULT_MANUFACTURER,
-            "audio": Path(audio_text) if audio_text else None,
+            "audio": self._jingle_choice.selected_path(),
         }
 
     def set_fields(
@@ -381,8 +425,14 @@ class BuildForm(QGroupBox):
         long_name: str,
         manufacturer: str,
         audio: Path | None,
+        audio_label: str | None = None,
     ) -> None:
-        """Fill every field, e.g. from a loaded CIA. ``fields_changed`` fires as usual."""
+        """Fill every field, e.g. from a loaded CIA. ``fields_changed`` fires as usual.
+
+        ``audio`` is taken as is (it is not checked against the jingle rules);
+        ``audio_label`` is how it is named in the list when it is not one of
+        the catalog's files.
+        """
         index = self._core_combo.findData(core)
         if index >= 0:
             self._core_combo.setCurrentIndex(index)
@@ -393,7 +443,7 @@ class BuildForm(QGroupBox):
         self._short_name_edit.setText(short_name)
         self._long_name_edit.setText(long_name)
         self._manufacturer_edit.setText(manufacturer)
-        self._audio_edit.setText(str(audio) if audio else "")
+        self._jingle_choice.select_path(audio, audio_label)
 
     def reset(self) -> None:
         """Back to an empty form, with the same defaults as at startup."""

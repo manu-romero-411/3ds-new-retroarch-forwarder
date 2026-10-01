@@ -19,7 +19,7 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QAction, QCloseEvent, QIcon, QKeySequence, QPalette
 from PySide6.QtWidgets import (
     QMessageBox,
@@ -39,6 +39,7 @@ from .document import Document
 from .settings import AppSettings
 from .widgets.artwork_panel import ArtworkPanel
 from .widgets.build_form import BuildForm
+from .widgets.console_preview import ConsolePreview
 from .widgets.elided_label import ElidedLabel
 from .widgets.log_panel import LogPanel
 from .widgets.title_id_bar import TitleIdBar
@@ -46,6 +47,10 @@ from .widgets.top_bar import TopBar
 from .workers.build_worker import BuildWorker
 
 WINDOW_TITLE = "3DS Forwarder Builder"
+DEFAULT_WINDOW_SIZE = QSize(920, 800)
+# The right-hand pane holds the console preview, which only reads well when wide.
+PREVIEW_PANE_MIN_WIDTH = 240
+SPLITTER_SIZES = [470, 430]
 # The document label is set a little smaller than the rest of the UI.
 DOCUMENT_LABEL_SCALE = 0.85
 ELLIPSIS = "\u2026"
@@ -56,7 +61,7 @@ class MainWindow(QWidget):
 
     def __init__(self) -> None:
         super().__init__()
-        self.resize(760, 760)
+        self.resize(DEFAULT_WINDOW_SIZE)
 
         self._settings = AppSettings()
         self._document = Document()
@@ -68,6 +73,7 @@ class MainWindow(QWidget):
 
         self._build_form = BuildForm(self)
         self._artwork_panel = ArtworkPanel(self._settings, self._build_form.long_name_text, self)
+        self._console_preview = ConsolePreview(self)
         self._title_id_bar = TitleIdBar(self)
         self._log_panel = LogPanel(self)
         self._actions = self._create_actions()
@@ -78,6 +84,7 @@ class MainWindow(QWidget):
         self._connect_signals()
         self._assemble_layout()
 
+        self._console_preview.show_artwork(*self._artwork_panel.current_previews())
         self._refresh_title_id()
         self._update_window_title()
 
@@ -133,34 +140,48 @@ class MainWindow(QWidget):
         return label
 
     def _build_editor_area(self) -> QSplitter:
-        form_scroll = QScrollArea()
-        form_scroll.setWidgetResizable(True)
-        form_scroll.setWidget(self._build_form)
-        # No horizontal scrollbar: the form must shrink to fit the column
-        # instead of the column growing/scrolling to fit the form.
-        form_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        """Left: the fields and artwork controls (scrolls). Right: the live preview (stays put)."""
+        controls = QWidget()
+        controls_layout = QVBoxLayout(controls)
+        controls_layout.addWidget(self._build_form)
+        controls_layout.addWidget(self._artwork_panel)
+        controls_layout.addStretch(1)
 
-        artwork_scroll = QScrollArea()
-        artwork_scroll.setWidgetResizable(True)
-        artwork_scroll.setWidget(self._artwork_panel)
-        artwork_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        # Keeps the artwork column narrow (it stacks Icon/Hero/Logo/banner
-        # preview vertically) so the window doesn't need to grow wide to
-        # fit a horizontal row of slots.
-        artwork_scroll.setMinimumWidth(260)
-        artwork_scroll.setMaximumWidth(320)
+        controls_scroll = QScrollArea()
+        controls_scroll.setWidgetResizable(True)
+        controls_scroll.setWidget(controls)
+        # No horizontal scrollbar: the controls must shrink to fit the column
+        # instead of the column growing/scrolling to fit them.
+        controls_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        # ...and the window must not shrink past what they need, or the preview
+        # pane would squeeze them into an unusable sliver.
+        controls_scroll.setMinimumWidth(
+            controls.minimumSizeHint().width()
+            + controls_scroll.verticalScrollBar().sizeHint().width()
+            + 2 * controls_scroll.frameWidth()
+        )
+
+        # The preview is not inside a scroll area on purpose: while the artwork
+        # is being edited it has to stay in view to show the effect.
+        preview_pane = QWidget()
+        preview_pane.setMinimumWidth(PREVIEW_PANE_MIN_WIDTH)
+        preview_layout = QVBoxLayout(preview_pane)
+        preview_layout.addWidget(self._console_preview)
+        preview_layout.addStretch(1)
 
         splitter = QSplitter(Qt.Horizontal)
-        splitter.addWidget(form_scroll)
-        splitter.addWidget(artwork_scroll)
-        splitter.setStretchFactor(0, 3)
-        splitter.setStretchFactor(1, 2)
-        splitter.setSizes([460, 300])
+        splitter.addWidget(controls_scroll)
+        splitter.addWidget(preview_pane)
+        splitter.setStretchFactor(0, 1)
+        splitter.setStretchFactor(1, 1)
+        splitter.setSizes(SPLITTER_SIZES)
         return splitter
 
     def _connect_signals(self) -> None:
         self._artwork_panel.log_message.connect(self._append_log)
         self._artwork_panel.changed.connect(self._mark_dirty)
+        self._artwork_panel.previews_changed.connect(self._console_preview.show_artwork)
+        self._build_form.log_message.connect(self._append_log)
         self._build_form.fields_changed.connect(self._on_content_changed)
         self._build_form.catalogs_changed.connect(self._refresh_title_id)
         self._title_id_bar.changed.connect(self._on_content_changed)
@@ -288,6 +309,7 @@ class MainWindow(QWidget):
             long_name=loaded.long_name,
             manufacturer=loaded.manufacturer,
             audio=assets.audio,
+            audio_label="From the CIA",
         )
         self._artwork_panel.reset()
         if loaded.icon_png:
@@ -373,6 +395,7 @@ class MainWindow(QWidget):
             icon=icon_path,
             banner=banner_path,
             audio=fields["audio"],
+            platform_logo=self._artwork_panel.platform_logo_path(),
             manual_unique_id=manual_unique_id,
             replace_existing_id=self._replaces_document_id(manual_unique_id),
         )

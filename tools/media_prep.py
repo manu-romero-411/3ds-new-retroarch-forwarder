@@ -67,9 +67,36 @@ def prepare_icon(src: Path, dst: Path) -> None:
     resize_image_stretch(src, dst, ICON_WIDTH, ICON_HEIGHT)
 
 
-def prepare_banner_image(src: Path, dst: Path) -> None:
-    """Resize ``src`` into a 256x128 banner image at ``dst``."""
-    resize_image_stretch(src, dst, BANNER_WIDTH, BANNER_HEIGHT)
+def prepare_banner_image(src: Path, dst: Path, overlay: Path | None = None) -> None:
+    """Resize ``src`` into a 256x128 banner image at ``dst``.
+
+    With ``overlay`` (a PNG of exactly that size, usually with transparency)
+    it is drawn on top of the resized banner, so e.g. a console frame sits
+    in front of the artwork. The blend is a plain "source over" in RGBA.
+    """
+    if overlay is None:
+        resize_image_stretch(src, dst, BANNER_WIDTH, BANNER_HEIGHT)
+        return
+
+    filters = (
+        f"[0:v]scale={BANNER_WIDTH}:{BANNER_HEIGHT},format=rgba[base];"
+        "[1:v]format=rgba[frame];"
+        "[base][frame]overlay=format=rgb"
+    )
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-i",
+        str(src),
+        "-i",
+        str(overlay),
+        "-filter_complex",
+        filters,
+        "-frames:v",
+        "1",
+        str(dst),
+    ]
+    _run_ffmpeg(cmd, f"drawing {overlay.name} over the banner")
 
 
 def prepare_banner_audio(src: Path | None, dst: Path) -> None:

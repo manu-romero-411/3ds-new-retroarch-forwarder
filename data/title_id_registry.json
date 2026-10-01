@@ -104,14 +104,5 @@
     "rom_path": "roms/megadrive/Klax (USA, Europe) (Tengen).zip",
     "resolved_with_nonce": null,
     "manual": false
-  },
-  {
-    "key": "Super Mario World\u001fSuper Mario World\u001fSuper Mario World\u001fNintendo\u001fsnes9x2005\u001froms/snes/Super Mario World (USA).zip",
-    "unique_id": 1046395,
-    "name": "Super Mario World",
-    "core": "snes9x2005",
-    "rom_path": "roms/snes/Super Mario World (USA).zip",
-    "resolved_with_nonce": null,
-    "manual": false
   }
 ]

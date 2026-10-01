@@ -1,76 +1,62 @@
-"""asset_slot.py — One artwork slot (preview + Search/Browse/Clear buttons).
+"""asset_slot.py — One artwork slot: a title, Search/Browse/Clear and where it came from.
 
-Purely a UI element: it shows whatever preview bytes it is given and emits
-signals when the user wants to search SteamGridDB, browse a local file, or
-clear the slot. All SteamGridDB/network/composition logic lives in
-``ArtworkPanel``, which owns and wires up these slots — this class has no
-opinion on where the image data comes from.
+Purely a UI element: it emits signals when the user wants to search
+SteamGridDB, browse a local file, or clear the slot, and shows a one-line
+caption of the current source. It deliberately has no image preview of its
+own: what the artwork looks like is shown, in context, by ``ConsolePreview``.
+All SteamGridDB/network/composition logic lives in ``ArtworkPanel``, which
+owns and wires up these slots.
 """
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QPixmap
-from PySide6.QtWidgets import QGroupBox, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
+from PySide6.QtCore import Signal
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
-PREVIEW_SIZE = (180, 100)
+NO_SOURCE_TEXT = "(none selected)"
+_TITLE_MIN_WIDTH = 44
 
 
-class AssetSlot(QGroupBox):
-    """A labeled artwork slot with a preview and Search/Browse/Clear actions."""
+class AssetSlot(QWidget):
+    """A labeled artwork slot with Search/Browse/Clear actions and a source caption."""
 
     search_requested = Signal()
     browse_requested = Signal()
     clear_requested = Signal()
 
     def __init__(self, title: str, hint: str, parent=None) -> None:
-        super().__init__(title, parent)
+        super().__init__(parent)
 
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(2)
 
-        self._preview_label = QLabel("(none selected)")
-        self._preview_label.setAlignment(Qt.AlignCenter)
-        self._preview_label.setFixedSize(*PREVIEW_SIZE)
-        self._preview_label.setStyleSheet("border: 1px dashed palette(mid); color: palette(mid);")
-        layout.addWidget(self._preview_label, alignment=Qt.AlignHCenter)
+        row = QHBoxLayout()
+        title_label = QLabel(f"<b>{title}</b>")
+        title_label.setMinimumWidth(_TITLE_MIN_WIDTH)
+        title_label.setToolTip(hint)
+        row.addWidget(title_label)
+        row.addStretch(1)
 
-        hint_label = QLabel(hint)
-        hint_label.setWordWrap(True)
-        hint_label.setStyleSheet("font-size: 8pt; color: palette(mid);")
-        layout.addWidget(hint_label)
-
-        self._source_label = QLabel("")
-        self._source_label.setWordWrap(True)
-        self._source_label.setStyleSheet("font-size: 8pt; font-style: italic;")
-        layout.addWidget(self._source_label)
-
-        # Search gets its own full-width row (its label is the longest);
-        # Browse/Clear share a second row. Two short rows instead of one
-        # wide one keeps the whole slot narrow.
-        search_button = QPushButton("Search SteamGridDB\u2026")
+        search_button = QPushButton("Search\u2026")
+        search_button.setToolTip(f"Search SteamGridDB. {hint}")
         search_button.clicked.connect(self.search_requested)
-        layout.addWidget(search_button)
+        row.addWidget(search_button)
 
-        second_row = QHBoxLayout()
         browse_button = QPushButton("Browse\u2026")
+        browse_button.setToolTip(f"Use a local image file. {hint}")
         browse_button.clicked.connect(self.browse_requested)
-        second_row.addWidget(browse_button)
+        row.addWidget(browse_button)
 
         clear_button = QPushButton("Clear")
         clear_button.clicked.connect(self.clear_requested)
-        second_row.addWidget(clear_button)
-        layout.addLayout(second_row)
+        row.addWidget(clear_button)
+        layout.addLayout(row)
 
-    def set_preview(self, image_bytes: bytes | None, source_text: str = "") -> None:
-        """Update the thumbnail preview and the small caption below it."""
-        if image_bytes:
-            pixmap = QPixmap()
-            pixmap.loadFromData(image_bytes)
-            pixmap = pixmap.scaled(
-                PREVIEW_SIZE[0], PREVIEW_SIZE[1], Qt.KeepAspectRatio, Qt.SmoothTransformation
-            )
-            self._preview_label.setPixmap(pixmap)
-        else:
-            self._preview_label.setPixmap(QPixmap())
-            self._preview_label.setText("(none selected)")
-        self._source_label.setText(source_text)
+        self._source_label = QLabel(NO_SOURCE_TEXT)
+        self._source_label.setStyleSheet("font-size: 8pt; font-style: italic; color: palette(mid);")
+        layout.addWidget(self._source_label)
+
+    def set_source(self, source_text: str = "") -> None:
+        """Caption where the current image came from (empty: nothing selected)."""
+        self._source_label.setText(source_text or NO_SOURCE_TEXT)

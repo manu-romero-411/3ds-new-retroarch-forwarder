@@ -14,6 +14,11 @@ image out of two optional SteamGridDB assets:
 Either input may be missing (e.g. only a logo was picked, or neither was),
 in which case a plain placeholder background is used so there is always a
 valid image to preview and to hand to ``build_forwarder``.
+
+A *platform frame* (see ``tools/media_catalog.py``) is drawn over the finished
+banner by the build itself (``tools/media_prep.prepare_banner_image``). The
+``frame_*`` helpers here repeat that exact operation -- stretch to 256x128,
+then "source over" -- only so the preview shows what the build will produce.
 """
 
 from __future__ import annotations
@@ -103,3 +108,17 @@ def compose_banner_to_file(hero_bytes: bytes | None, logo_bytes: bytes | None, d
     dest.parent.mkdir(parents=True, exist_ok=True)
     image.save(dest, format="PNG")
     return dest
+
+
+def frame_png_bytes(banner_png: bytes, frame_png: bytes) -> bytes:
+    """Draw ``frame_png`` over ``banner_png`` as the build does, as PNG bytes (preview only).
+
+    The banner is first stretched to 256x128 (whatever its size, like the
+    build does), then the frame is alpha-composited on top of it.
+    """
+    banner = Image.open(BytesIO(banner_png)).convert("RGBA")
+    banner = banner.resize((BANNER_WIDTH, BANNER_HEIGHT), Image.Resampling.BICUBIC)
+    banner.alpha_composite(Image.open(BytesIO(frame_png)).convert("RGBA"))
+    buffer = BytesIO()
+    banner.convert("RGB").save(buffer, format="PNG")
+    return buffer.getvalue()
