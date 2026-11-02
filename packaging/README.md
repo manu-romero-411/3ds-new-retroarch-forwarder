@@ -77,15 +77,29 @@ packaging/ci/smoke-test.sh dist/<package>            # in a clean container
 ```
 
 `PACKAGE_RELEASE` (default `1`) and `PACKAGE_MAINTAINER` can be set in the
-environment. The version always comes from `src/forwarder3ds/__init__.py`.
+environment.
+
+## Version
+
+The version is the git tag and nothing else: no file in the tree holds it.
+`v1.2.3` gives `1.2.3`; a commit after it gives `1.2.3+git4.gabc1234`. It
+reaches each kind of installation like this:
+
+- **.deb/.rpm**: `common.sh` takes `PACKAGE_VERSION` (the release workflow
+  passes the tag) or `git describe`, and writes `forwarder3ds/_version.py`
+  into the package;
+- **pip / install.sh**: setuptools-scm writes the same file at build time,
+  from the git history or, for a GitHub source archive, from
+  `.git_archival.txt` (filled in by `git archive` thanks to `.gitattributes`);
+- **a plain checkout**: `forwarder3ds/version.py` runs `git describe`.
 
 ## Releases (GitHub Actions)
 
 `.github/workflows/release.yml` runs only when a tag `vX.Y.Z` is pushed;
 ordinary commits do not trigger it. It then:
 
-1. checks that the tag points at a commit of `main` and matches
-   `__version__`, that `stub/source/cores_table.h` matches `cores.json`, and
+1. checks that the tag points at a commit of `main` and looks like a
+   version (`v1.2.3`), that `stub/source/cores_table.h` matches `cores.json`, and
    runs pylint, pytest and shellcheck;
 2. works out the target distributions (`targets.py`);
 3. compiles the stub once (it is an ARM11 binary for the console, the same

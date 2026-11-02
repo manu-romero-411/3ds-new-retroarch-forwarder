@@ -40,11 +40,11 @@ jobs:
             exit 1
           fi
 
-      - name: Tag matches __version__
+      # The tag is the version (nothing in the tree holds it): v1.2.3 -> 1.2.3.
+      - name: Tag is a version
         run: |
-          version="$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' src/forwarder3ds/__init__.py)"
-          if [[ "${TAG#v}" != "${version}" ]]; then
-            echo "::error::Tag ${TAG} does not match __version__ ${version}"
+          if [[ ! "${TAG}" =~ ^v[0-9]+(\.[0-9]+)*$ ]]; then
+            echo "::error::Tag ${TAG} is not a version like v1.2.3"
             exit 1
           fi
 
@@ -130,15 +130,16 @@ jobs:
       - name: Build in ${{ matrix.image }}
         run: |
           docker run --rm -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
-            -e PACKAGE_MAINTAINER -v "${PWD}:/src" -w /src "${{ matrix.image }}" \
+            -e PACKAGE_VERSION="${TAG#v}" -e PACKAGE_MAINTAINER \
+            -v "${PWD}:/src" -w /src "${{ matrix.image }}" \
             bash packaging/ci/build-package.sh "${{ matrix.format }}" "${{ matrix.suffix }}"
           ls -l dist
 
       - name: Install and use it in a clean ${{ matrix.image }}
         run: |
           package="$(ls dist/*."${{ matrix.format }}")"
-          docker run --rm -v "${PWD}:/src:ro" -w /src "${{ matrix.image }}" \
-            bash packaging/ci/smoke-test.sh "${package}"
+          docker run --rm -e EXPECTED_VERSION="${TAG#v}" -v "${PWD}:/src:ro" -w /src \
+            "${{ matrix.image }}" bash packaging/ci/smoke-test.sh "${package}"
 
       - uses: actions/upload-artifact@v7
         with:

@@ -3,6 +3,8 @@
 #
 #   packaging/ci/smoke-test.sh dist/<package>.deb|.rpm
 #
+# EXPECTED_VERSION, if set, must be what '3ds-forwarder --version' reports.
+#
 # Installs with apt or dnf (dependencies included), builds a real forwarder
 # with the bundled toolchain and reads it back, opens the main window
 # off-screen, then removes the package and checks nothing is left behind.
@@ -49,7 +51,10 @@ build_forwarder() {
     local work
     work="$(mktemp -d)"
     export HOME="${work}"
-    3ds-forwarder --version
+    3ds-forwarder --version | tee "${work}/version.txt"
+    if [[ -n "${EXPECTED_VERSION:-}" ]]; then
+        grep -qx "3ds-forwarder ${EXPECTED_VERSION}" "${work}/version.txt"
+    fi
     3ds-forwarder doctor --offline
     3ds-forwarder build --core snes9x2005 --rom "roms/snes/Smoke Test (USA).sfc" \
         --long-name "Smoke Test" --jingle smw_coin -o "${work}/smoke.cia"

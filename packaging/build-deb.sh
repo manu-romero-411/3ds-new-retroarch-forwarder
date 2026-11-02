@@ -9,7 +9,8 @@
 #               the package then depends on the Qt runtime libraries instead
 #
 # Output: dist/3ds-new-retroarch-forwarder_<version>-<release>~<suffix>_<arch>.deb
-# Environment: PACKAGE_RELEASE (default 1), PACKAGE_MAINTAINER.
+# Environment: PACKAGE_VERSION (default: from the git tag), PACKAGE_RELEASE
+# (default 1), PACKAGE_MAINTAINER.
 set -euo pipefail
 # shellcheck source=packaging/common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"

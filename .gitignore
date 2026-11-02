@@ -15,13 +15,16 @@ stub/audio.wav
 stub/debug_*.bmp
 
 # --- Native toolchain built locally (packaging/toolchain/*.sh) -------------
-toolchain/
+/toolchain/
 
 # --- Packaging output ---------------------------------------------------------
-build/
-dist/
-dist-stub/
+/build/
+/dist/
+/dist-stub/
 *.egg-info/
+
+# --- Generated from the git tag at build time ------------------------------
+src/forwarder3ds/_version.py
 
 # --- Python -----------------------------------------------------------------
 __pycache__/

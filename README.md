@@ -143,6 +143,14 @@ QT_QPA_PLATFORM=offscreen pytest
 
 A git checkout finds `./toolchain/` by itself (it is git-ignored).
 
+**Releasing** is only pushing a tag on `main`; the tag is the version, there
+is no version number to edit anywhere:
+
+```bash
+git push origin main
+git tag v0.3.0 && git push origin v0.3.0
+```
+
 ```
 src/forwarder3ds/
 ├── cli.py              command line

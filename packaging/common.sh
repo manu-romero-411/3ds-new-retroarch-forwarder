@@ -38,12 +38,23 @@ die() {
     exit 1
 }
 
-# Version from src/forwarder3ds/__init__.py (single source of truth).
+# Package version: $PACKAGE_VERSION if set (the release workflow passes the
+# tag without its "v"), otherwise derived from "git describe" like the
+# program does: v1.2.3 -> 1.2.3, v1.2.3-4-gabc -> 1.2.3+git4.gabc.
 package_version() {
-    local version
-    version="$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' "${REPO_ROOT}/src/${MODULE}/__init__.py")"
-    [[ -n "${version}" ]] || die "Cannot read __version__"
-    printf '%s\n' "${version}"
+    local described
+    if [[ -n "${PACKAGE_VERSION:-}" ]]; then
+        printf '%s\n' "${PACKAGE_VERSION#v}"
+        return 0
+    fi
+    described="$(git -C "${REPO_ROOT}" describe --tags --match 'v[0-9]*' 2> /dev/null)" \
+        || die "No v* tag to take the version from: tag the commit or set PACKAGE_VERSION"
+    described="${described#v}"
+    if [[ "${described}" =~ ^([0-9.]+)-([0-9]+)-g([0-9a-f]+)$ ]]; then
+        printf '%s+git%s.g%s\n' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}"
+    else
+        printf '%s\n' "${described}"
+    fi
 }
 
 # A toolchain directory must hold both programs and the stub.
@@ -94,6 +105,8 @@ stage_tree() {
     cp -r "${REPO_ROOT}/src/${MODULE}" "${prefix}/lib/"
     find "${prefix}/lib" -name '__pycache__' -type d -prune -exec rm -rf {} +
     find "${prefix}/lib" -type f -name '*.py[co]' -delete
+    # The installed program reads its version from here (see version.py).
+    printf '__version__ = "%s"\n' "$(package_version)" > "${prefix}/lib/${MODULE}/_version.py"
 
     mkdir -p "${prefix}/toolchain"
     cp -r "${toolchain}/." "${prefix}/toolchain/"

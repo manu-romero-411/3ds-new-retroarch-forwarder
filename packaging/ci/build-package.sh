@@ -10,7 +10,8 @@
 # bannertool there, adds the stub from STUB_DIR (default: dist-stub/, built
 # once by the workflow) and builds the package into dist/. When the
 # distribution has no PySide6 (Ubuntu 24.04), PySide6-Essentials is bundled.
-# HOST_UID/HOST_GID, if set, become the owners of build/ and dist/.
+# HOST_UID/HOST_GID, if set, become the owners of build/ and dist/;
+# PACKAGE_VERSION (the tag without "v") is passed on to the package build.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

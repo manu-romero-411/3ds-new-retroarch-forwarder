@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=77", "wheel"]
+requires = ["setuptools>=77", "setuptools-scm>=8", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -36,8 +36,10 @@ dev = ["pylint>=3", "pytest>=7", "black>=24"]
 [project.urls]
 Homepage = "https://github.com/manu-romero-411/3ds-new-retroarch-forwarder"
 
-[tool.setuptools.dynamic]
-version = { attr = "forwarder3ds.__version__" }
+# The version is the git tag (v1.2.3); nothing in the tree holds it.
+[tool.setuptools_scm]
+version_file = "src/forwarder3ds/_version.py"
+fallback_version = "0.0.0"
 
 [tool.setuptools.packages.find]
 where = ["src"]

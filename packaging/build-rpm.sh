@@ -7,7 +7,8 @@
 #
 # Output: dist/3ds-new-retroarch-forwarder-<version>-<release>.<dist>.<arch>.rpm
 # (<dist> is the build system's own, e.g. fc43). Environment:
-# PACKAGE_RELEASE (default 1), PACKAGE_MAINTAINER.
+# PACKAGE_VERSION (default: from the git tag), PACKAGE_RELEASE (default 1),
+# PACKAGE_MAINTAINER.
 set -euo pipefail
 # shellcheck source=packaging/common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
