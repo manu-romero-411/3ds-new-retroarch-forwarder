@@ -39,6 +39,10 @@ Homepage = "https://github.com/manu-romero-411/3ds-new-retroarch-forwarder"
 # The version is the git tag (v1.2.3); nothing in the tree holds it.
 [tool.setuptools_scm]
 version_file = "src/forwarder3ds/_version.py"
+version_file_template = """\"\"\"Written at build time from the git tag; do not edit.\"\"\"
+
+__version__ = version = "{version}"
+"""
 fallback_version = "0.0.0"
 
 [tool.setuptools.packages.find]
@@ -59,6 +63,8 @@ testpaths = ["tests"]
 
 [tool.pylint.main]
 py-version = "3.11"
+# Generated at build time (see forwarder3ds/version.py), not hand-written code.
+ignore = ["_version.py"]
 # PySide6 is a compiled extension: without this pylint cannot see its classes.
 extension-pkg-allow-list = ["PySide6"]
 
