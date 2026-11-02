@@ -1,0 +1,322 @@
+"""Settings window: one page per concern, navigated from a side list.
+
+Pages edit a private copy of :class:`~forwarder3ds.core.settings.Settings`;
+nothing is applied until *Apply* or *OK* is pressed.
+"""
+
+from __future__ import annotations
+
+import copy
+from pathlib import Path
+
+from PySide6.QtCore import QObject, Qt, QUrl, Signal
+from PySide6.QtGui import QDesktopServices
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QDialog,
+    QDialogButtonBox,
+    QFormLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QPushButton,
+    QStackedWidget,
+    QVBoxLayout,
+    QWidget,
+)
+
+from forwarder3ds.artwork.steamgriddb import API_KEY_HELP_URL, SGDBClient
+from forwarder3ds.builder.toolchain import find_toolchain
+from forwarder3ds.core import catalog, paths
+from forwarder3ds.core.settings import DEFAULT_MANUFACTURER, Settings, ToolchainSettings
+from forwarder3ds.gui.bridge import TaskThread
+from forwarder3ds.gui.widgets.path_picker import PathPicker
+
+
+class _Page(QWidget):
+    """A settings page: copies values in and out of a :class:`Settings`."""
+
+    title = ""
+
+    def load(self, settings: Settings) -> None:
+        """Fill the widgets from ``settings``."""
+
+    def store(self, settings: Settings) -> None:
+        """Write the widgets back into ``settings``."""
+
+
+def _hint(text: str) -> QLabel:
+    label = QLabel(text)
+    label.setWordWrap(True)
+    label.setOpenExternalLinks(True)
+    return label
+
+
+class GeneralPage(_Page):
+    """Defaults for new forwarders and where files go."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.title = self.tr("General")
+        self._manufacturer = QLineEdit()
+        self._manufacturer.setPlaceholderText(DEFAULT_MANUFACTURER)
+        self._output = PathPicker(select_dir=True, placeholder=str(Path.home()))
+        self._sd_card = PathPicker(select_dir=True, placeholder=self.tr("Detect mounted cards"))
+        self._registry = PathPicker(
+            select_dir=False,
+            placeholder=str(paths.default_registry_file()),
+            file_filter=self.tr("JSON files (*.json)"),
+        )
+        form = QFormLayout(self)
+        form.addRow(self.tr("Default manufacturer:"), self._manufacturer)
+        form.addRow(self.tr("Save new CIAs in:"), self._output)
+        form.addRow(self.tr("3DS SD card:"), self._sd_card)
+        form.addRow(
+            "",
+            _hint(
+                self.tr(
+                    "Browse SD… opens this folder. Leave it empty to look for a mounted card "
+                    "with a 'Nintendo 3DS' folder or boot.firm."
+                )
+            ),
+        )
+        form.addRow(self.tr("Title ID registry:"), self._registry)
+        form.addRow(
+            "",
+            _hint(
+                self.tr(
+                    "Every Title ID handed out is recorded here, so two forwarders never "
+                    "share one. Point several computers at the same (synced) file to keep "
+                    "that true across them."
+                )
+            ),
+        )
+
+    def load(self, settings: Settings) -> None:
+        general = settings.general
+        self._manufacturer.setText(
+            "" if general.manufacturer == DEFAULT_MANUFACTURER else general.manufacturer
+        )
+        self._output.set_text(general.output_dir)
+        self._sd_card.set_text(general.sd_card)
+        self._registry.set_text(general.registry)
+
+    def store(self, settings: Settings) -> None:
+        general = settings.general
+        general.manufacturer = self._manufacturer.text().strip() or DEFAULT_MANUFACTURER
+        general.output_dir = self._output.text()
+        general.sd_card = self._sd_card.text()
+        general.registry = self._registry.text()
+
+
+class _CheckSignals(QObject):
+    done = Signal(bool, str)
+
+
+class SteamGridDBPage(_Page):
+    """API key, a *Test* button and the search filters."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.title = self.tr("SteamGridDB")
+        self._key = QLineEdit()
+        self._key.setEchoMode(QLineEdit.EchoMode.PasswordEchoOnEdit)
+        self._nsfw = QCheckBox(self.tr("Include artwork marked as adult content"))
+        self._humor = QCheckBox(self.tr("Include humorous artwork"))
+        self._status = QLabel()
+        self._thread: TaskThread | None = None
+        test = QPushButton(self.tr("Test"))
+        test.clicked.connect(self._test)
+
+        key_row = QHBoxLayout()
+        key_row.addWidget(self._key, 1)
+        key_row.addWidget(test)
+        form = QFormLayout(self)
+        form.addRow(self.tr("API key:"), key_row)
+        form.addRow("", self._status)
+        form.addRow(
+            "",
+            _hint(
+                self.tr(
+                    "SteamGridDB is where icons, heroes and logos come from. Get a key in "
+                    '<a href="{url}">your SteamGridDB preferences</a>.'
+                ).format(url=API_KEY_HELP_URL)
+            ),
+        )
+        form.addRow(self._nsfw)
+        form.addRow(self._humor)
+
+    def load(self, settings: Settings) -> None:
+        self._key.setText(settings.steamgriddb.api_key)
+        self._nsfw.setChecked(settings.steamgriddb.nsfw)
+        self._humor.setChecked(settings.steamgriddb.humor)
+
+    def store(self, settings: Settings) -> None:
+        settings.steamgriddb.api_key = self._key.text().strip()
+        settings.steamgriddb.nsfw = self._nsfw.isChecked()
+        settings.steamgriddb.humor = self._humor.isChecked()
+
+    def _test(self) -> None:
+        if self._thread is not None:
+            return
+        client = SGDBClient(self._key.text())
+        self._status.setText(self.tr("Testing…"))
+        self._thread = TaskThread(client.check, parent=self)
+        self._thread.succeeded.connect(lambda _r: self._status.setText(self.tr("✔ The key works.")))
+        self._thread.failed.connect(lambda message: self._status.setText(f"✘ {message}"))
+        self._thread.finished.connect(self._on_test_finished)
+        self._thread.start()
+
+    def _on_test_finished(self) -> None:
+        self._thread = None
+
+
+class ToolchainPage(_Page):
+    """Where makerom, bannertool, the stub and ffmpeg are; overrides if needed."""
+
+    _ITEMS = (
+        ("makerom", "makerom:"),
+        ("bannertool", "bannertool:"),
+        ("stub", "Stub (.elf):"),
+        ("ffmpeg", "ffmpeg (optional):"),
+    )
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.title = self.tr("Toolchain")
+        self._pickers: dict[str, PathPicker] = {}
+        form = QFormLayout(self)
+        form.addRow(
+            _hint(
+                self.tr(
+                    "The packages and install.sh ship these tools built for this system. "
+                    "Leave a field empty to use what is found automatically (shown in grey)."
+                )
+            )
+        )
+        for key, label in self._ITEMS:
+            picker = PathPicker(select_dir=False)
+            picker.edit.textChanged.connect(self._refresh_status)
+            self._pickers[key] = picker
+            form.addRow(self.tr(label), picker)
+        self._status = QLabel()
+        self._status.setWordWrap(True)
+        form.addRow("", self._status)
+        self._detected = find_toolchain()
+        self._show_detected()
+
+    def _current(self) -> ToolchainSettings:
+        return ToolchainSettings(**{key: picker.text() for key, picker in self._pickers.items()})
+
+    def _show_detected(self) -> None:
+        for key, picker in self._pickers.items():
+            found = getattr(self._detected, key)
+            picker.set_placeholder(str(found) if found else self.tr("Not found"))
+
+    def _refresh_status(self) -> None:
+        tools = find_toolchain(self._current())
+        if tools.complete:
+            self._status.setText(self.tr("✔ Ready to build forwarders."))
+        else:
+            self._status.setText(
+                self.tr("✘ Missing: {items}").format(items=", ".join(tools.missing))
+            )
+
+    def load(self, settings: Settings) -> None:
+        self._detected = find_toolchain()
+        self._show_detected()
+        for key, picker in self._pickers.items():
+            picker.set_text(getattr(settings.toolchain, key))
+        self._refresh_status()
+
+    def store(self, settings: Settings) -> None:
+        settings.toolchain = self._current()
+
+
+class MediaPage(_Page):
+    """Where the user's own jingles and platform logos go."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.title = self.tr("Jingles and logos")
+        form = QFormLayout(self)
+        form.addRow(
+            _hint(
+                self.tr(
+                    "Drop your own files in these folders; they are listed after the bundled "
+                    "ones.<br><b>Jingles:</b> {jingles}<br><b>Platform logos:</b> {logos}"
+                ).format(jingles=catalog.JINGLE_RULES, logos=catalog.PLATFORM_LOGO_RULES)
+            )
+        )
+        for label, folder in (
+            (self.tr("Jingles:"), paths.user_jingles_dir()),
+            (self.tr("Platform logos:"), paths.user_platform_logos_dir()),
+        ):
+            button = QPushButton(self.tr("Open"))
+            button.clicked.connect(lambda _=False, f=folder: self._open(f))
+            row = QHBoxLayout()
+            path_label = QLabel(str(folder))
+            path_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            row.addWidget(path_label, 1)
+            row.addWidget(button)
+            form.addRow(label, row)
+
+    @staticmethod
+    def _open(folder: Path) -> None:
+        folder.mkdir(parents=True, exist_ok=True)
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
+
+
+class SettingsDialog(QDialog):
+    """Side list of pages plus OK / Apply / Cancel."""
+
+    applied = Signal(object)  # a new Settings
+
+    def __init__(self, settings: Settings, parent: QWidget | None = None, page: int = 0) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(self.tr("Settings"))
+        self.resize(760, 460)
+        self._settings = copy.deepcopy(settings)
+        self._pages: list[_Page] = [GeneralPage(), SteamGridDBPage(), ToolchainPage(), MediaPage()]
+
+        self._list = QListWidget()
+        self._list.setMaximumWidth(180)
+        self._stack = QStackedWidget()
+        for page_widget in self._pages:
+            self._list.addItem(page_widget.title)
+            self._stack.addWidget(page_widget)
+            page_widget.load(self._settings)
+        self._list.currentRowChanged.connect(self._stack.setCurrentIndex)
+        self._list.setCurrentRow(max(0, min(page, len(self._pages) - 1)))
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok
+            | QDialogButtonBox.StandardButton.Apply
+            | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        apply_button = buttons.button(QDialogButtonBox.StandardButton.Apply)
+        apply_button.clicked.connect(self._apply)
+
+        body = QHBoxLayout()
+        body.addWidget(self._list)
+        body.addWidget(self._stack, 1)
+        column = QVBoxLayout(self)
+        column.addLayout(body, 1)
+        column.addWidget(buttons)
+
+    def _apply(self) -> None:
+        for page_widget in self._pages:
+            page_widget.store(self._settings)
+        self.applied.emit(copy.deepcopy(self._settings))
+
+    def accept(self) -> None:
+        """Apply, then close."""
+        self._apply()
+        super().accept()
+
+
+#: Page indexes, for opening the dialog on a given page.
+PAGE_GENERAL, PAGE_STEAMGRIDDB, PAGE_TOOLCHAIN, PAGE_MEDIA = range(4)

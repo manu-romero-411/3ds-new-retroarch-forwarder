@@ -1,0 +1,68 @@
+"""Minimal PNG encoder built on the standard library only.
+
+The CIA reader and the placeholder assets only need to emit simple
+truecolor PNGs, so they use this instead of Pillow and stay usable
+without it.
+"""
+
+from __future__ import annotations
+
+import struct
+import zlib
+from pathlib import Path
+
+_PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+_COLOR_TYPE_RGB = 2
+_COLOR_TYPE_RGBA = 6
+_IHDR_END = 24  # signature (8) + chunk header (8) + width/height (8)
+
+
+def _chunk(tag: bytes, data: bytes) -> bytes:
+    """Serialize one PNG chunk (length, tag, data, CRC)."""
+    return (
+        struct.pack(">I", len(data))
+        + tag
+        + data
+        + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
+    )
+
+
+def encode_png(width: int, height: int, pixels: bytes, has_alpha: bool = False) -> bytes:
+    """Encode raw 8-bit pixels as a PNG.
+
+    ``pixels`` is row-major, top row first, three bytes per pixel (RGB) or
+    four (RGBA) when ``has_alpha`` is set. Raises ``ValueError`` if its
+    length does not match ``width`` x ``height``.
+    """
+    channels = 4 if has_alpha else 3
+    stride = width * channels
+    if len(pixels) != stride * height:
+        raise ValueError(
+            f"expected {stride * height} bytes of pixel data for a "
+            f"{width}x{height} image, got {len(pixels)}"
+        )
+
+    color_type = _COLOR_TYPE_RGBA if has_alpha else _COLOR_TYPE_RGB
+    ihdr = struct.pack(">IIBBBBB", width, height, 8, color_type, 0, 0, 0)
+    # Every scanline is prefixed with filter type 0 ("None").
+    raw = b"".join(b"\x00" + pixels[row * stride : (row + 1) * stride] for row in range(height))
+    return (
+        _PNG_SIGNATURE
+        + _chunk(b"IHDR", ihdr)
+        + _chunk(b"IDAT", zlib.compress(raw, 9))
+        + _chunk(b"IEND", b"")
+    )
+
+
+def png_dimensions(path: Path) -> tuple[int, int]:
+    """Return ``(width, height)`` of the PNG at ``path`` without decoding it.
+
+    Raises ``ValueError`` if the file is not a PNG, ``OSError`` if it cannot
+    be read.
+    """
+    with path.open("rb") as handle:
+        header = handle.read(_IHDR_END)
+    if len(header) < _IHDR_END or header[:8] != _PNG_SIGNATURE or header[12:16] != b"IHDR":
+        raise ValueError("not a PNG file")
+    width, height = struct.unpack(">II", header[16:_IHDR_END])
+    return width, height

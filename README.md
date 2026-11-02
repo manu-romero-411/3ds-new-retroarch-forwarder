@@ -1,209 +1,181 @@
-# 3ds-new-forwarder-generator
+# 3ds-new-retroarch-forwarder
 
-Generador de forwarders CIA para 3DS que cargan un juego directamente con
-el core de RetroArch correspondiente, sin encapsular un RetroArch completo
-dentro del CIA (a diferencia de New Super Ultimate Injector). Pensado para
-Luma3DS/Rosalina (sin soporte para entrypoints legacy tipo *hax).
+Builds one installable **CIA per game** for a 3DS running Luma3DS. Each
+forwarder shows its own icon, banner and jingle on the HOME menu and launches
+the game directly with the matching RetroArch core, **without bundling a
+whole RetroArch** in every CIA (unlike New Super Ultimate Injector).
 
-> Convención del proyecto: el código (C y Python — nombres, comentarios,
-> mensajes de log) está en inglés; esta documentación está en español.
+- A stub compiled once with devkitARM is repackaged per game with a RomFS
+  holding the core name and the ROM path, and a **deterministic,
+  collision-checked Title ID**. Nothing is compiled per game.
+- On first launch the forwarder installs the core's CIA from
+  `sdmc:/retroarch/cores/` if it is not installed yet, then jumps to it.
+- Artwork comes from **SteamGridDB** (icon, hero and logo; the banner is the
+  hero with the logo on top), or from your own image files.
+- Existing forwarders can be opened, edited and rebuilt under the same
+  Title ID, so the new CIA installs over the old one.
+- Graphical interface (PySide6) and a command line with the same features.
 
-## Estructura del proyecto
+## Install
 
-```
-3ds-new-forwarder-generator/
-├── README.md
-├── Dockerfile                    # entorno devkitARM + makerom + bannertool
-├── pyproject.toml                # config de pylint
-├── stub/                         # el .3dsx/.elf que se compila UNA sola vez
-│   ├── Makefile
-│   ├── forwarder.rsf
-│   ├── romfs/                    # RomFS de ejemplo para "make cia" suelto
-│   └── source/
-│       ├── main.c
-│       └── cores_table.h         # AUTO-GENERADO, ver tools/generate_cores_table.py
-├── data/
-│   ├── cores.json                # catálogo de cores RetroArch -> Title ID
-│   └── title_id_registry.json    # registro de IDs ya asignados (se versiona)
-├── tools/                        # toolchain Python (paquete, ver más abajo)
-│   ├── cores_registry.py
-│   ├── title_id.py
-│   ├── parse_retroarch_cores.py
-│   ├── generate_cores_table.py
-│   ├── generate_placeholder_assets.py
-│   ├── png_codec.py              # codificador PNG (solo stdlib)
-│   ├── ctr_assets.py             # decodifica icono/banner/audio de un CIA
-│   ├── cia_reader.py             # lee un forwarder .cia existente
-│   ├── media_catalog.py          # catálogo y reglas de jingles/logos de plataforma
-│   ├── sd_card.py                # detecta la SD de la 3DS y rutas relativas a ella
-│   ├── rom_names.py              # título sugerido a partir del nombre de la ROM
-│   └── build_forwarder.py        # generador por juego (backend, punto de entrada para una UI futura)
-├── ui/                            # UI de escritorio (PySide6/Qt), ver ui/README.md
-│   ├── app.py                    # entry point (`python3 -m ui.app`)
-│   ├── main_window.py            # barra superior + flujo New/Open/Save/Save As
-│   ├── document.py               # estado del documento (fichero, Title ID, cambios)
-│   ├── jingle_player.py          # reproduce el jingle seleccionado (QtMultimedia)
-│   ├── assets/3ds_frame.png      # marco de la 3DS para la vista previa
-│   ├── settings.py
-│   ├── sgdb/                     # cliente SteamGridDB + composición hero+logo
-│   ├── dialogs/                  # diálogos modales (conflicto de juego, galería)
-│   ├── widgets/                  # formulario + panel de artwork + log
-│   └── workers/                  # hilos de fondo (red y build)
-├── run_ui.py                      # lanzador de la UI desde la raíz del proyecto
-├── requirements-ui.txt            # dependencias extra de la UI (PySide6, requests, Pillow)
-├── scripts/
-│   └── build_stub.sh
-└── output/                       # .cia generados (gitignored)
-```
-
-Los scripts de `tools/` son un paquete Python de verdad (tienen
-`__init__.py`), así que se ejecutan como módulo, desde la raíz del
-proyecto:
+**Debian, Ubuntu (two latest LTS) and Fedora (two latest releases),
+`amd64`/`arm64`:** download the package for your system from the
+[latest release](https://github.com/manu-romero-411/3ds-new-retroarch-forwarder/releases/latest)
+and install it with your package manager:
 
 ```bash
-python3 -m tools.build_forwarder \
-    --core snes9x \
-    --rom "roms/snes/Super Mario World.sfc" \
-    --name "Super Mario World" \
-    --short-name "SMW" \
-    --long-name "Super Mario World (SNES)" \
-    --manufacturer "Nintendo"
+sudo apt install ./3ds-new-retroarch-forwarder_*~ubuntu24.04_amd64.deb
+sudo dnf install ./3ds-new-retroarch-forwarder-*.fc43.x86_64.rpm
 ```
 
-Si no se pasan `--icon/--banner/--audio`, se generan placeholders
-automáticamente. El icono y el banner que sí pases (o el placeholder) se
-redimensionan siempre a 48×48 y 256×128 estirando (sin recortar); el audio
-se re-codifica siempre a PCM 16-bit / 44.1kHz / estéreo y se recorta a 3
-segundos, sea cual sea su formato de origen (usa `ffmpeg`, ya incluido en
-la imagen Docker). El `.cia` sale en `output/<name>.cia`.
+It adds *3DS Forwarder* to the application menu. `makerom`, `bannertool` and
+the stub are inside the package, built for that system and architecture.
 
-### Jingles y logos de plataforma
-
-Dos carpetas en la raíz del proyecto sirven para dar personalidad al acceso
-directo (cada una tiene un `README.md` con las reglas):
-
-- `audio_jingles/`: ficheros `.wav` con la melodía que suena al seleccionar el
-  icono en el menú HOME. Reglas: WAV PCM de 16 bits, mono o estéreo, 3 s como
-  máximo.
-- `platform_logos/`: ficheros `.png` de **256x128** con transparencia, que se
-  dibujan **encima del banner ya compuesto** (logo de la consola, marco...).
+**Anything else (Fedora Atomic, Bazzite, SteamOS, Arch, openSUSE...):** use
+`install.sh`. It uses podman if you have it or installs Docker, compiles the
+tools in a container of your own distribution and version (statically in
+Alpine for distributions it does not know), and installs the program in a
+private virtual environment. Python 3.11+ is required.
 
 ```bash
-python3 -m tools.build_forwarder --list-jingles --list-platform-logos
-python3 -m tools.build_forwarder ... --jingle "Mi melodia" --platform-logo snes
+curl -fsSL https://raw.githubusercontent.com/manu-romero-411/3ds-new-retroarch-forwarder/main/install.sh | bash
+# options: --system, --version vX.Y.Z, --static, --download-stub, --no-gui, --uninstall
 ```
 
-`--jingle` y `--platform-logo` aceptan un nombre de la carpeta (sin extensión)
-o la ruta a cualquier fichero que cumpla las reglas. `--jingle` no convierte
-nada y es incompatible con `--audio`, que sigue aceptando cualquier formato de
-ffmpeg. Un fichero que incumple las reglas sale en las listas con el motivo.
+See [packaging/README.md](packaging/README.md) for how packages are built.
 
-### Modificar un CIA existente
-
-`--from-cia` carga un forwarder ya generado (core, ruta de la ROM, nombres,
-manufacturer, icono, banner y audio) y lo **reconstruye desde cero**
-manteniendo su Title ID. Cualquier otro flag sobrescribe el valor cargado, y
-si no se pasa `--output` se reemplaza el propio fichero:
+## Graphical interface
 
 ```bash
-python3 -m tools.build_forwarder --from-cia output/mario.cia --long-name "Super Mario World (USA)"
+3ds-forwarder-gui
 ```
 
-Solo se leen CIAs generados por esta herramienta (contenido sin cifrar y
-RomFS con `core.txt`/`content.path`); cualquier otro se rechaza con un
-mensaje claro. El banner se recupera como imagen final: la composición
-original hero+logo no se puede deshacer.
+The window goes from general to specific:
 
-### UI gráfica (PySide6/Qt)
+1. **Game** (left): the RetroArch core, the ROM path on the SD card
+   (*Browse SD…* picks it on a mounted card) and the names shown on the HOME
+   menu. The names follow the ROM's file name until you edit them.
+2. **Presentation** (middle): the **icon**, the **banner** (SteamGridDB hero
+   + logo, or a ready-made image, plus an optional platform frame) and the
+   **jingle**, with a play button. *SteamGridDB…* searches by the long name;
+   when several games match you pick one, then a gallery of thumbnails.
+3. **Preview** (right): a 3DS showing the banner on the top screen and the
+   icon on the HOME menu grid, exactly as they will be built.
 
-También hay una UI de escritorio en `ui/` con los mismos campos que la CLI,
-más un buscador de artwork contra SteamGridDB (icono, hero y logo, con
-composición automática del banner) y una vista previa en vivo sobre una
-3DS: el banner en la pantalla superior y el icono en una cuadrícula del menú
-HOME en la inferior. Documentación
-completa (instalación, flujo de uso) en `ui/README.md`; arranque rápido:
+The toolbar holds **New**, **Open…**, **Save** (builds the CIA), **Save As…**,
+**Settings** and the **Title ID**, which updates live; untick *Auto* to type a
+Unique ID yourself (collisions are flagged). The **Activity** panel at the
+bottom shows what is going on and the log; the status bar shows the file
+being edited and whether the toolchain is ready.
+
+**Settings** holds everything configured once: default manufacturer, output
+folder, SD card folder, Title ID registry, the SteamGridDB key and filters,
+the toolchain (with overrides) and your own jingle and logo folders.
+
+## Command line
 
 ```bash
-pip3 install -r requirements-ui.txt
-python3 run_ui.py
+3ds-forwarder build --core snes9x2005 --rom "roms/snes/Super Mario World (USA).sfc" \
+    --long-name "Super Mario World" --steamgriddb --jingle smw_coin
+3ds-forwarder build ... --icon icon.png --hero hero.png --logo logo.png --platform-logo snes
+3ds-forwarder build ... --dry-run               # only print the Title ID
+3ds-forwarder build --from-cia game.cia --short-name "SMW"   # rebuild, same Title ID
+3ds-forwarder inspect game.cia [--extract DIR]  # what a forwarder contains
+3ds-forwarder cores snes                        # cores that can be forwarded
+3ds-forwarder media                             # jingles and platform logos
+3ds-forwarder doctor                            # toolchain and SteamGridDB key
+3ds-forwarder config                            # settings (secrets masked)
 ```
 
-## Estado actual
+`--steamgriddb` takes the first icon, hero and logo of the matching game
+(`--sgdb-game ID` forces the game). Without artwork a plain placeholder is
+used. Images of any size are stretched (never cropped) to 48×48 and 256×128.
 
-- [x] Diseño de arquitectura (stub compilado una vez + reempaquetado por juego)
-- [x] Stub funcional (`stub/`): lee `core.txt` y `content.path` desde su
-      propia RomFS, resuelve el core contra `cores_table.h`, instala el CIA
-      del core si falta y salta a él con `APT_DoApplicationJump`.
-- [x] Backend CLI (`tools/build_forwarder.py`) que genera, por cada juego:
-      RomFS temporal + `.rsf` con Title ID único + `makerom` → `.cia`.
-- [x] Generación determinista de Title ID con registro anti-colisión
-      (`tools/title_id.py`, ver sección de abajo).
-- [x] Nombre corto, nombre largo y manufacturer independientes (campos SMDH
-      reales: `-s`/`-l`/`-p` de bannertool), en vez de un único `--title`.
-- [x] Redimensionado automático de icono (48x48) y banner (256x128) por
-      estiramiento, y normalización del audio del banner a PCM 16-bit /
-      44.1kHz / estéreo / máx. 3s, sea cual sea el formato de entrada
-      (`tools/media_prep.py`, vía `ffmpeg`).
-- [x] Cargar CIAs existentes y reconstruirlos conservando su Title ID
-      (`tools/cia_reader.py`, `--from-cia` y Open/Save/Save As en la UI).
-- [x] Icono/banner por juego reales de tu colección: la UI (`ui/`) permite
-      buscarlos en SteamGridDB (icono, hero y logo por separado) o
-      cargarlos desde un fichero local; si no se elige ninguno, se sigue
-      cayendo al placeholder de siempre.
-- [x] UI / frontend (`ui/`, PySide6/Qt) — reutiliza directamente
-      `build_forwarder()` sin duplicar lógica; ver `ui/README.md` (en
-      inglés) para el flujo completo, incluida la búsqueda/composición de
-      artwork vía SteamGridDB.
+## Configuration
 
-## Generación determinista del Title ID
+Settings live in `~/.config/3ds-forwarder/config.ini` (owner-only
+permissions: it holds the SteamGridDB key). The API key of the previous,
+unpackaged UI is imported on first run.
 
-Un Title ID de 3DS es `(0x00040000 << 32) | (UniqueId << 8) | Variation`.
-Lo único que un forwarder puede elegir es `UniqueId` (20 bits). Los CIA de
-los cores de RetroArch ya ocupan el bloque `0xBAC00`-`0xBACFF`
-(`data/cores.json`), así que los forwarders nunca pueden pisar ese rango.
+| Data | Location |
+|---|---|
+| Title ID registry | `~/.local/share/3ds-forwarder/title_id_registry.json` (configurable) |
+| Your jingles | `~/.local/share/3ds-forwarder/jingles/` |
+| Your platform logos | `~/.local/share/3ds-forwarder/platform_logos/` |
 
-`tools/title_id.py` deriva el `UniqueId` de un hash SHA-256 de los campos
-que identifican al forwarder — nombre, nombre corto, nombre largo,
-manufacturer, core y ruta de la ROM — dentro de un bloque propio reservado
-(`0xF0000`-`0xFFFFF`, convención habitual para forwarders/homebrew, lejos
-del bloque de los cores). Esto da dos propiedades:
+Jingles must be 16-bit PCM WAVs of at most 3 s; platform logos 256×128 PNGs
+with transparency. Other audio files can be used with `--audio` (needs
+`ffmpeg`).
 
-- **Determinista**: los mismos datos siempre producen el mismo ID, en
-  cualquier máquina, sin necesitar un contador compartido.
-- **Sin colisión conocida**: cada ID asignado se guarda en
-  `data/title_id_registry.json` junto con la clave que lo generó. Al pedir
-  un ID para datos ya vistos, se reutiliza el mismo (idempotente). Si el
-  hash cae en un ID ya usado por otro forwarder o por un core, se prueba
-  de forma determinista con un "nonce" incremental hasta encontrar uno
-  libre — así que solo el juego que realmente choca cambia de ID, y el
-  resultado sigue siendo 100% reproducible mientras el registro no cambie.
+## Deterministic Title IDs
 
-Nintendo no publica los rangos que ha asignado a títulos reales, así que
-ningún generador no oficial puede garantizar cero colisión al 100%; lo que
-sí se puede (y se hace aquí) es evitar el rango conocido de los cores y
-dejar rastro de cada asignación para poder auditarla o corregirla a mano
-si algún día hiciera falta.
+A 3DS Title ID is `(0x00040000 << 32) | (UniqueId << 8) | Variation`; the
+only part a forwarder chooses is the 20-bit `UniqueId`. The RetroArch core
+CIAs already use `0xBAC00`–`0xBACFF` (see `cores.json`), so forwarders never
+touch that block.
 
-`data/title_id_registry.json` se versiona en el repositorio (no está en
-`.gitignore`) precisamente para que la propiedad "sin colisión" se
-mantenga entre máquinas y clones, no solo en la tuya.
+The `UniqueId` is derived from a SHA-256 of the fields that identify the
+forwarder (name, short name, long name, manufacturer, core and ROM path),
+inside a block of its own (`0xF0000`–`0xFFFFF`):
 
-## Calidad de código Python
+- **Deterministic**: the same fields always give the same ID, on any
+  machine, without a shared counter.
+- **No known collision**: every ID handed out is recorded in the registry
+  with the key that produced it. Seen fields reuse their ID; if a hash lands
+  on an ID used by another forwarder or a core, a deterministic nonce is
+  added until a free one is found, so only the colliding game changes.
 
-`pyproject.toml` trae la configuración de `pylint` para este proyecto
-(`pylint tools/`). Los módulos usan type hints, dataclasses y docstrings;
-las únicas reglas desactivadas son las que penalizarían la firma "plana"
-de `build_forwarder()` sin ganar legibilidad real a este tamaño.
+Nintendo does not publish the ranges of retail titles, so no unofficial tool
+can guarantee zero collisions; this one avoids the known core block and
+keeps an auditable record. Point several computers at the same (synced)
+registry file to keep the guarantee across them.
 
-## Memoria de la conversación de diseño
+## Development
 
-- APP_SYSTEM_MODE_EXT lo declara el `.3dsx` del CORE (no el stub). Para
-  cores de PSX (PCSX ReARMed), usar 124MB en su build para ir sobrado;
-  verificar el valor real que usa el build oficial en
-  `pkg/ctr/Makefile.cores` del repo de RetroArch antes de darlo por bueno.
-- Toolchain en Docker: imagen base `devkitpro/devkitarm` (mantenida
-  oficialmente, Docker Hub) + paquete de herramientas 3DS (`makerom`,
-  `bannertool`) vía `dkp-pacman` dentro de la imagen.
-- El ticket del CIA no hay que forjarlo aparte: `makerom` genera uno válido
-  al construir el `.cia`, suficiente para instalar con FBI bajo Luma3DS
-  (que parchea la verificación de firmas).
+```bash
+pip install -e '.[gui,dev]'
+packaging/toolchain/build-tools.sh toolchain   # makerom + bannertool for this machine
+packaging/toolchain/build-stub.sh toolchain    # stub (devkitARM via docker/podman)
+3ds-forwarder doctor
+pylint src/forwarder3ds tests scripts packaging/targets.py
+QT_QPA_PLATFORM=offscreen pytest
+```
+
+A git checkout finds `./toolchain/` by itself (it is git-ignored).
+
+```
+src/forwarder3ds/
+├── cli.py              command line
+├── core/               Title IDs, core catalog, names, SD card, settings, paths
+├── ctr/                3DS formats: CIA reader, SMDH/banner decoders, PNG
+├── builder/            build pipeline, image/audio preparation, toolchain lookup
+├── artwork/            SteamGridDB client, banner compositor
+├── gui/                Qt interface (main window, panels, dialogs)
+└── data/               cores.json, RSF template, jingles, logos, icon, 3DS frame
+stub/                   the stub (C, devkitARM); cores_table.h is generated
+scripts/                maintainer tools: refresh cores.json / cores_table.h
+packaging/              toolchain builds, .deb/.rpm, CI scripts, release targets
+install.sh              installer for systems without a package
+```
+
+To refresh the core list after a RetroArch update:
+
+```bash
+python3 scripts/parse_retroarch_cores.py <RetroArch>/pkg/ctr/Makefile.cores > src/forwarder3ds/data/cores.json
+python3 scripts/generate_cores_table.py src/forwarder3ds/data/cores.json > stub/source/cores_table.h
+```
+
+### Design notes
+
+- `APP_SYSTEM_MODE_EXT` is declared by the **core's** `.3dsx`, not the stub.
+  For PSX (PCSX ReARMed) check the value of the official build in RetroArch's
+  `pkg/ctr/Makefile.cores` before relying on a different one.
+- No ticket has to be forged: `makerom` writes a valid one, enough to
+  install with FBI under Luma3DS (which patches signature checks).
+- The CIA content is stored unencrypted (`EnableCrypt: false`), which is
+  what lets `inspect` and *Open…* read forwarders back.
+
+## Licence
+
+GPL-3.0-only. The bundled `makerom` and `bannertool` are MIT-licensed; their
+licences are installed with them.

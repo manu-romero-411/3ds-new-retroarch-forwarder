@@ -1,0 +1,18 @@
+Package: 3ds-new-retroarch-forwarder
+Version: @VERSION@
+Architecture: @ARCH@
+Maintainer: @MAINTAINER@
+Installed-Size: @INSTALLED_SIZE@
+Depends: @DEPENDS@
+Recommends: @RECOMMENDS@
+Section: games
+Priority: optional
+Homepage: https://github.com/manu-romero-411/3ds-new-retroarch-forwarder
+Description: build 3DS forwarder CIAs that launch a game with RetroArch
+ Creates one installable CIA per game for a 3DS running Luma3DS. Each
+ forwarder shows its own icon, banner and jingle on the HOME menu and
+ launches the game with the matching RetroArch core, without bundling a
+ whole RetroArch. Artwork comes from SteamGridDB.
+ .
+ Includes a Qt graphical interface (3ds-forwarder-gui), a command line tool
+ (3ds-forwarder) and the makerom and bannertool programs it needs.

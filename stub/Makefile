@@ -22,8 +22,9 @@ DATA		:=	data
 INCLUDES	:=	include
 ROMFS		:=	romfs
 
-# Path to the shared Python tooling, one level up from this Makefile.
-TOOLS_DIR	:=	$(TOPDIR)/../tools
+# The Python package, one level up from this Makefile (placeholder assets
+# and the RSF template shared with the per-game builds).
+PY_SRC		:=	$(TOPDIR)/../src
 
 APP_TITLE       := Forwarder
 APP_DESCRIPTION := 3ds-new-forwarder-generator stub
@@ -53,7 +54,9 @@ LIBDIRS	:= $(CTRULIB)
 #---------------------------------------------------------------------------------
 BANNERTOOL	?=	bannertool
 MAKEROM		?=	makerom
-RSF			:=	forwarder.rsf
+RSF			:=	$(PY_SRC)/forwarder3ds/data/forwarder.rsf
+# Unique ID of the loose stub CIA ("make cia"), only used for testing.
+STUB_UNIQUE_ID	?=	0xFF3FF
 
 #---------------------------------------------------------------------------------
 ifneq ($(BUILD),$(notdir $(CURDIR)))
@@ -147,7 +150,7 @@ clean:
 # overwritten.
 #---------------------------------------------------------------------------------
 icon.png banner.png audio.wav:
-	python3 $(TOOLS_DIR)/generate_placeholder_assets.py --out-dir $(TOPDIR)
+	PYTHONPATH=$(PY_SRC) python3 -m forwarder3ds.builder.placeholders --out-dir $(TOPDIR)
 
 icon.icn: icon.png
 	@# "-f visible,recordusage": without "visible" the title installs and
@@ -166,10 +169,11 @@ banner.bnr: banner.png audio.wav
 #---------------------------------------------------------------------------------
 .PHONY: cia
 cia: all icon.icn banner.bnr
-	@# The RomFS is NOT passed on the CLI: it is already set in
-	@# forwarder.rsf (RomFs: RootPath: romfs), makerom reads it from there.
+	@# Same RSF as the per-game builds: the RomFS folder and the Unique ID
+	@# are substituted on the command line (see builder/forwarder.py).
 	$(MAKEROM) -f cia -o $(TARGET).cia -rsf $(RSF) -target t -exefslogo \
-		-elf $(OUTPUT).elf -icon icon.icn -banner banner.bnr
+		-elf $(OUTPUT).elf -icon icon.icn -banner banner.bnr \
+		-DROMFS_DIR=$(TOPDIR)/$(ROMFS) -DUNIQUE_ID=$(STUB_UNIQUE_ID)
 	@echo "--------------------------------------------------------------"
 	@echo " CIA generated: $(TARGET).cia -- install it with FBI"
 	@echo "--------------------------------------------------------------"

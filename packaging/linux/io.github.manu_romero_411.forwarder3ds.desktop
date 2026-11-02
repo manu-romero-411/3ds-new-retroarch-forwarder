@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=3DS Forwarder
+GenericName=3DS forwarder builder
+Comment=Build 3DS CIAs that launch one game with its RetroArch core
+Exec=3ds-forwarder-gui
+Icon=io.github.manu_romero_411.forwarder3ds
+Terminal=false
+Categories=Game;Utility;
+Keywords=3ds;retroarch;forwarder;cia;luma3ds;homebrew;
+StartupWMClass=io.github.manu_romero_411.forwarder3ds

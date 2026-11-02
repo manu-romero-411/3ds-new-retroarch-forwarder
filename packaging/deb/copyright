@@ -1,0 +1,28 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: 3ds-new-retroarch-forwarder
+Source: https://github.com/manu-romero-411/3ds-new-retroarch-forwarder
+
+Files: *
+Copyright: manu-romero-411
+License: GPL-3.0-only
+ This program is free software: you can redistribute it and/or modify
+ it under the terms of the GNU General Public License as published by
+ the Free Software Foundation, version 3.
+ .
+ This program is distributed in the hope that it will be useful,
+ but WITHOUT ANY WARRANTY; without even the implied warranty of
+ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ GNU General Public License for more details.
+ .
+ On Debian systems, the complete text of the GNU General Public License
+ version 3 can be found in "/usr/share/common-licenses/GPL-3".
+
+Files: opt/3ds-new-retroarch-forwarder/toolchain/bin/makerom
+Copyright: 2014 3DSGuy, 2014 applestash, 2015-2022 Jakcron
+License: MIT
+ See /opt/3ds-new-retroarch-forwarder/toolchain/LICENSES/makerom.txt
+
+Files: opt/3ds-new-retroarch-forwarder/toolchain/bin/bannertool
+Copyright: 2015-2017 Steveice10
+License: MIT
+ See /opt/3ds-new-retroarch-forwarder/toolchain/LICENSES/bannertool.txt

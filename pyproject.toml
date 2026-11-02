@@ -1,35 +1,86 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "3ds-new-retroarch-forwarder"
+dynamic = ["version"]
+description = "Build 3DS forwarder CIAs that launch one game with its RetroArch core"
+readme = "README.md"
+license = "GPL-3.0-only"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
+authors = [{ name = "manu-romero-411" }]
+keywords = ["3ds", "retroarch", "forwarder", "cia", "luma3ds", "steamgriddb"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Environment :: X11 Applications :: Qt",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Topic :: Games/Entertainment",
+]
+dependencies = ["requests>=2.28", "Pillow>=10.0"]
+
+[project.optional-dependencies]
+gui = ["PySide6>=6.5"]
+dev = ["pylint>=3", "pytest>=7", "black>=24"]
+
+[project.scripts]
+3ds-forwarder = "forwarder3ds.cli:main"
+
+[project.gui-scripts]
+3ds-forwarder-gui = "forwarder3ds.gui.app:main"
+
+[project.urls]
+Homepage = "https://github.com/manu-romero-411/3ds-new-retroarch-forwarder"
+
+[tool.setuptools.dynamic]
+version = { attr = "forwarder3ds.__version__" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"forwarder3ds.data" = [
+    "*.json",
+    "*.rsf",
+    "*.png",
+    "icons/*.svg",
+    "jingles/*",
+    "platform_logos/*",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
 [tool.pylint.main]
 py-version = "3.11"
-# PySide6 is a compiled extension: without this pylint cannot see any of its
-# classes (false no-name-in-module errors on every Qt import in ui/).
+# PySide6 is a compiled extension: without this pylint cannot see its classes.
 extension-pkg-allow-list = ["PySide6"]
 
 [tool.pylint.typecheck]
-# Qt signals are objects created by the binding at runtime, so pylint infers
-# ``signal.connect`` as a plain function without those members.
-generated-members = ["connect", "emit", "disconnect"]
+# Qt signals are objects created by the binding at runtime.
+generated-members = ["connect", "disconnect", "emit"]
 
 [tool.pylint.format]
 max-line-length = 100
 
-[tool.pylint."messages control"]
-# - missing-module-docstring/missing-function-docstring: most public
-#   functions have one; disabled so private one-liners aren't flagged.
-# - too-many-arguments/too-many-locals: build_forwarder.py's CLI glue
-#   genuinely needs a flat argument list; a config object would just move
-#   the same fields around for no readability gain at this size.
-disable = [
-    "missing-module-docstring",
-    "missing-function-docstring",
-    "too-many-arguments",
-    "too-many-positional-arguments",
-    "too-many-locals",
-    "too-few-public-methods",
-    # CoreEntry/ForwarderRequest are plain data records; splitting their
-    # fields into nested objects would add indirection without adding
-    # meaning at this size.
-    "too-many-instance-attributes",
-]
+[tool.pylint.design]
+# Binary format parsers and Qt panels genuinely hold many locals/attributes.
+max-attributes = 18
+max-locals = 25
+max-args = 7
+max-positional-arguments = 7
+min-public-methods = 0
+
+[tool.pylint.similarities]
+min-similarity-lines = 8
 
 [tool.pylint.basic]
 good-names = ["f", "i", "n"]
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]

@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.manu_romero_411.forwarder3ds</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-only</project_license>
+  <name>3DS Forwarder</name>
+  <summary>Build 3DS CIAs that launch one game with its RetroArch core</summary>
+  <description>
+    <p>
+      Creates one installable CIA per game for a 3DS running Luma3DS. Each
+      forwarder appears on the HOME menu with its own icon, banner and jingle,
+      and launches the game directly with the matching RetroArch core, without
+      bundling a whole RetroArch.
+    </p>
+    <p>
+      Artwork comes from SteamGridDB (icon, hero and logo), and a live preview
+      shows how the forwarder will look on the console. Existing forwarders can
+      be opened, edited and rebuilt under the same Title ID.
+    </p>
+  </description>
+  <launchable type="desktop-id">io.github.manu_romero_411.forwarder3ds.desktop</launchable>
+  <url type="homepage">https://github.com/manu-romero-411/3ds-new-retroarch-forwarder</url>
+  <url type="bugtracker">https://github.com/manu-romero-411/3ds-new-retroarch-forwarder/issues</url>
+  <developer id="io.github.manu_romero_411">
+    <name>manu-romero-411</name>
+  </developer>
+  <content_rating type="oars-1.1"/>
+  <provides>
+    <binary>3ds-forwarder</binary>
+    <binary>3ds-forwarder-gui</binary>
+  </provides>
+</component>
