@@ -2,17 +2,24 @@
 # distributions, compile the stub once, build and test one package per
 # distribution and architecture (each inside its own container, on a runner
 # of that architecture) and publish a GitHub release with all of them plus
-# install.sh. Plain commits do not trigger it.
+# install.sh. Plain commits do not trigger it. It can also be started by
+# hand (Actions › Release › Run workflow) for an existing tag.
 name: Release
 
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to release (e.g. v0.2.0)"
+        required: true
 
 permissions:
   contents: read
 
 env:
+  TAG: ${{ inputs.tag || github.ref_name }}
   PACKAGE_MAINTAINER: ${{ vars.PACKAGE_MAINTAINER || 'manu-romero-411 <manu-romero-411@users.noreply.github.com>' }}
 
 jobs:
@@ -22,21 +29,22 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
+          ref: refs/tags/${{ env.TAG }}
           fetch-depth: 0  # full history to check the tag against main
 
       - name: Tag is on main
         run: |
           git fetch --no-tags origin main
-          if ! git merge-base --is-ancestor "${GITHUB_SHA}" origin/main; then
-            echo "::error::Tag ${GITHUB_REF_NAME} does not point at a commit of main"
+          if ! git merge-base --is-ancestor HEAD origin/main; then
+            echo "::error::Tag ${TAG} does not point at a commit of main"
             exit 1
           fi
 
       - name: Tag matches __version__
         run: |
           version="$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' src/forwarder3ds/__init__.py)"
-          if [[ "${GITHUB_REF_NAME#v}" != "${version}" ]]; then
-            echo "::error::Tag ${GITHUB_REF_NAME} does not match __version__ ${version}"
+          if [[ "${TAG#v}" != "${version}" ]]; then
+            echo "::error::Tag ${TAG} does not match __version__ ${version}"
             exit 1
           fi
 
@@ -72,6 +80,8 @@ jobs:
       matrix: ${{ steps.targets.outputs.matrix }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: refs/tags/${{ env.TAG }}
 
       - name: Debian stable, two latest Ubuntu LTS, two latest Fedora
         id: targets
@@ -84,6 +94,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
+          ref: refs/tags/${{ env.TAG }}
           fetch-depth: 0  # git describe names the stub's revision
 
       - name: Build
@@ -108,6 +119,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
+          ref: refs/tags/${{ env.TAG }}
           fetch-depth: 0
 
       - uses: actions/download-artifact@v8
@@ -142,6 +154,8 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: refs/tags/${{ env.TAG }}
 
       - uses: actions/download-artifact@v8
         with:
@@ -163,6 +177,7 @@ jobs:
 
       - uses: softprops/action-gh-release@v3
         with:
+          tag_name: ${{ env.TAG }}
           files: |
             dist/*.deb
             dist/*.rpm
