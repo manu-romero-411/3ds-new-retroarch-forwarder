@@ -134,6 +134,11 @@ main() {
     mkdir -p "${work}/romfs/game"
     cp "${rom}" "${work}/romfs/game/${rom_name}"
     cp "${SEED_CFG}" "${work}/romfs/game/retroarch.cfg"
+    if [[ -d "${base_dir}/assets" ]]; then
+        cp -r "${base_dir}/assets" "${work}/romfs/game/assets"
+    else
+        log "[WARN]" "Base without assets/: the touch screen menu will not be available"
+    fi
     write_manifest "${work}/romfs/game/manifest.cfg" "${rom_name}" \
         "${DATA_ROOT}/${slug}" "${system_dir}"
 

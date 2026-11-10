@@ -8,6 +8,7 @@
 #   OUT_DIR/bases/<CORE>/retroarch.elf   patched RetroArch + core
 #   OUT_DIR/bases/<CORE>/base.env        system mode and source revisions
 #   OUT_DIR/bases/<CORE>/{icon,banner}.png, audio.wav   RetroArch's defaults
+#   OUT_DIR/bases/<CORE>/assets/bottom_menu.png         touch screen menu
 # and records the revision in OUT_DIR/VERSIONS. Sources are checked out in
 # build/base/ (WORK_DIR overrides it). With DEVKITARM set (inside
 # devkitpro/devkitarm) it builds directly; otherwise it runs itself in that
@@ -23,7 +24,15 @@ source "${HERE}/versions.env"
 readonly RECIPES_DIR="${REPO_ROOT}/injector/cores"
 readonly PATCHES_DIR="${REPO_ROOT}/injector/patches/retroarch"
 # Current devkitPro ships libctru 2.x, with picasso and bin2s in tools/bin.
-readonly -a RA_MAKE_FLAGS=(-f Makefile.ctr USE_CTRULIB_2=1)
+RA_MAKE_FLAGS=(-f Makefile.ctr USE_CTRULIB_2=1)
+# A single-game CIA has no use for networking (netplay, updaters,
+# achievements, cloud sync): leaving it out makes the ELF smaller and quicker
+# to load. RA_LEAN=0 builds RetroArch's default feature set.
+if [[ "${RA_LEAN:-1}" == 1 ]]; then
+    RA_MAKE_FLAGS+=(HAVE_NETWORKING=0 HAVE_CHEEVOS=0 HAVE_CLOUDSYNC=0
+        HAVE_IFINFO=0 HAVE_BUILTINMBEDTLS=0)
+fi
+readonly -a RA_MAKE_FLAGS
 
 log() {
     local tag="$1"
@@ -64,6 +73,19 @@ checkout() {
     git -C "${dir}" fetch -q --depth 1 origin "${ref}"
     git -C "${dir}" checkout -q -f FETCH_HEAD
     git -C "${dir}" clean -q -fdx
+}
+
+# Checks out a single file of a big repository (blobless partial clone).
+fetch_file() {
+    local repo="$1" ref="$2" path="$3" dir="$4"
+    if [[ ! -d "${dir}/.git" ]]; then
+        git init -q "${dir}"
+        git -C "${dir}" remote add origin "${repo}"
+        git -C "${dir}" config remote.origin.promisor true
+        git -C "${dir}" config remote.origin.partialclonefilter blob:none
+    fi
+    git -C "${dir}" fetch -q --depth 1 --filter=blob:none origin "${ref}"
+    git -C "${dir}" checkout -q -f FETCH_HEAD -- "${path}"
 }
 
 patch_retroarch() {
@@ -110,11 +132,14 @@ build_core() {
     install -m 0644 "${ra_dir}/$(ra_make_var "${ra_dir}" "${CORE_NAME}" APP_ICON)" "${dest}/icon.png"
     install -m 0644 "${ra_dir}/$(ra_make_var "${ra_dir}" "${CORE_NAME}" APP_BANNER)" "${dest}/banner.png"
     install -m 0644 "${ra_dir}/$(ra_make_var "${ra_dir}" "${CORE_NAME}" APP_AUDIO)" "${dest}/audio.wav"
+    install -D -m 0644 "${work}/retroarch-assets/ctr/bottom_menu.png" \
+        "${dest}/assets/bottom_menu.png"
     {
         echo "CORE_NAME=${CORE_NAME}"
         echo "CORE_REF=${CORE_REF}"
         echo "RETROARCH_REF=${RETROARCH_REF}"
         echo "PATCHES=$(patches_digest)"
+        echo "LEAN=${RA_LEAN:-1}"
         echo "APP_SYSTEM_MODE=$(ra_make_var "${ra_dir}" "${CORE_NAME}" APP_SYSTEM_MODE)"
         echo "APP_SYSTEM_MODE_EXT=$(ra_make_var "${ra_dir}" "${CORE_NAME}" APP_SYSTEM_MODE_EXT)"
         echo "APP_BIG_TEXT_SECTION=$(ra_make_var "${ra_dir}" "${CORE_NAME}" APP_BIG_TEXT_SECTION)"
@@ -140,6 +165,8 @@ build_here() {
     log "[INFO]" "Checking out RetroArch ${RETROARCH_REF}"
     checkout "${RETROARCH_REPO}" "${RETROARCH_REF}" "${work}/RetroArch"
     patch_retroarch "${work}/RetroArch"
+    log "[INFO]" "Fetching the 3DS bottom screen assets"
+    fetch_file "${RETROARCH_ASSETS_REPO}" "${RETROARCH_ASSETS_REF}" ctr "${work}/retroarch-assets"
 
     for core in "$@"; do
         recipe="${RECIPES_DIR}/${core}.env"
@@ -167,7 +194,7 @@ build_in_container() {
     # Rootless podman maps the calling user to root inside the container.
     [[ "${run[-1]}" == podman ]] && user_args=()
     log "[INFO]" "Building bases ($*) in ${DEVKITARM_IMAGE} (${engine})"
-    "${run[@]}" run --rm "${user_args[@]}" -e HOME=/tmp \
+    "${run[@]}" run --rm "${user_args[@]}" -e HOME=/tmp -e RA_LEAN="${RA_LEAN:-1}" \
         -v "${REPO_ROOT}:/src${z}" -v "${out_dir}:/out${z}" -w /src "${DEVKITARM_IMAGE}" \
         bash /src/packaging/toolchain/build-base.sh /out "$@"
 }

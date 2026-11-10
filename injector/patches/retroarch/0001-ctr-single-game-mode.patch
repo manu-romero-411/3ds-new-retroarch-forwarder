@@ -2,13 +2,15 @@ ctr: single-game ("injected") mode
 
 When the CIA has a RomFS with romfs:/game/manifest.cfg, load the content
 from the RomFS and keep config, saves, states, remaps and logs in the
-manifest's data_dir instead of sdmc:/retroarch. Stock behaviour is
-unchanged for CIAs without that file.
+manifest's data_dir instead of sdmc:/retroarch. The core info folder points
+at the RomFS (nothing to parse at startup) and the bottom screen assets come
+from romfs:/game/assets when present. Stock behaviour is unchanged for CIAs
+without that file.
 
 Applies to RetroArch v1.22.2 (RETROARCH_REF in versions.env).
 
 diff --git a/frontend/drivers/platform_ctr.c b/frontend/drivers/platform_ctr.c
-index ef1459e8..c61acc67 100644
+index ef1459e8..31497676 100644
 --- a/frontend/drivers/platform_ctr.c
 +++ b/frontend/drivers/platform_ctr.c
 @@ -16,6 +16,7 @@
@@ -28,7 +30,7 @@ index ef1459e8..c61acc67 100644
  #include <string/stdstring.h>
  
  #ifdef HAVE_CONFIG_H
-@@ -95,6 +98,118 @@ static void get_first_valid_core(char* path_return, size_t len)
+@@ -95,6 +98,128 @@ static void get_first_valid_core(char* path_return, size_t len)
  }
  #endif
  
@@ -48,10 +50,12 @@ index ef1459e8..c61acc67 100644
 + *
 + * romfs:/game/retroarch.cfg, if present, seeds data_dir/retroarch.cfg the
 + * first time the game boots; later edits made in the menu are kept.
++ * romfs:/game/assets/ holds the bottom screen assets (bottom_menu.png).
 + */
 +#define CTR_INJECTED_DIR      "romfs:/game"
 +#define CTR_INJECTED_MANIFEST CTR_INJECTED_DIR "/manifest.cfg"
 +#define CTR_INJECTED_BASE_CFG CTR_INJECTED_DIR "/retroarch.cfg"
++#define CTR_INJECTED_ASSETS   CTR_INJECTED_DIR "/assets"
 +
 +static bool ctr_romfs_mounted = false;
 +static char ctr_injected_content[PATH_MAX_LENGTH];
@@ -122,6 +126,14 @@ index ef1459e8..c61acc67 100644
 +      strlcpy(g_defaults.dirs[DEFAULT_DIR_SYSTEM], system_dir,
 +            sizeof(g_defaults.dirs[DEFAULT_DIR_SYSTEM]));
 +
++   /* Startup parses every .info file (or their cache) in the core info
++    * folder; a single static core needs none of them. */
++   strlcpy(g_defaults.dirs[DEFAULT_DIR_CORE_INFO], CTR_INJECTED_DIR,
++         sizeof(g_defaults.dirs[DEFAULT_DIR_CORE_INFO]));
++   if (path_is_valid(CTR_INJECTED_ASSETS "/bottom_menu.png"))
++      strlcpy(g_defaults.dirs[DEFAULT_DIR_BOTTOM_ASSETS], CTR_INJECTED_ASSETS,
++            sizeof(g_defaults.dirs[DEFAULT_DIR_BOTTOM_ASSETS]));
++
 +   fill_pathname_join(g_defaults.path_config, data_dir,
 +         FILE_PATH_MAIN_CONFIG, sizeof(g_defaults.path_config));
 +   ctr_injected_seed_config();
@@ -147,7 +159,7 @@ index ef1459e8..c61acc67 100644
  static void frontend_ctr_get_env(int* argc, char* argv[],
        void* args, void* params_data)
  {
-@@ -138,6 +253,12 @@ static void frontend_ctr_get_env(int* argc, char* argv[],
+@@ -138,6 +263,12 @@ static void frontend_ctr_get_env(int* argc, char* argv[],
                        "ctr", sizeof(g_defaults.dirs[DEFAULT_DIR_BOTTOM_ASSETS]));
  
  #ifndef IS_SALAMANDER
@@ -160,7 +172,7 @@ index ef1459e8..c61acc67 100644
     dir_check_defaults("custom.ini");
  #endif
  }
-@@ -188,6 +309,12 @@ static void frontend_ctr_deinit(void* data)
+@@ -188,6 +319,12 @@ static void frontend_ctr_deinit(void* data)
     gfxTopRightFramebuffers[0] = NULL;
     gfxTopRightFramebuffers[1] = NULL;
     gfxExit();

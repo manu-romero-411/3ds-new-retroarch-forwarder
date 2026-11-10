@@ -10,17 +10,19 @@ only writes to its own folder on the SD card.
 ## How it works
 
 1. **Base**: RetroArch for 3DS, statically linked with one core and patched
-   with [`patches/retroarch/`](patches/retroarch/). The patch adds a
+   with [`patches/retroarch/`](patches/retroarch/). The main patch adds a
    *single-game mode*: when the CIA has `romfs:/game/manifest.cfg`,
    RetroArch loads the content from the RomFS and keeps every writable path
    in the manifest's `data_dir`. Without that file it behaves like stock
-   RetroArch.
+   RetroArch. A second one fixes a crash in RetroArch's touch screen menu
+   when its asset is missing.
 2. **CIA**: the base ELF plus a RomFS with:
 
    ```
    romfs:/game/<rom file>
    romfs:/game/manifest.cfg    content, data_dir, optional system_dir
    romfs:/game/retroarch.cfg   seed config, copied to data_dir on first boot
+   romfs:/game/assets/         touch screen menu (bottom_menu.png)
    ```
 
 On the SD card each game gets `sdmc:/3ds/injected/<slug>/` with
@@ -29,9 +31,20 @@ On the SD card each game gets `sdmc:/3ds/injected/<slug>/` with
 written. BIOS files go in `<data_dir>/system/` unless `--system-dir` points
 somewhere else (for example the shared `sdmc:/retroarch/cores/system`).
 
-The seed config turns on RetroArch's kiosk mode and hides the menu entries
-that make no sense for a single game (load core/content, updaters, close
-content). Quick Menu, save states, core options and *Quit RetroArch* stay.
+The seed config turns on RetroArch's kiosk mode and trims the menus: the
+main menu keeps only *Quick Menu* and *Quit RetroArch*, and the Quick Menu
+keeps resume, restart, save/load state, screenshot, core options and
+controls. While the menu is open, the touch screen shows RetroArch's 3DS
+bottom menu (resume, save state, load state, with the state's thumbnail).
+
+The core info folder points at the RomFS, so startup does not parse the
+hundreds of `.info` files in `sdmc:/retroarch/cores/info`. Bases are built
+without networking (netplay, updaters, achievements, cloud sync) for a
+smaller ELF; `RA_LEAN=0 packaging/toolchain/build-base.sh ...` builds
+RetroArch's full feature set instead.
+
+The seed config is only copied when `<data_dir>/retroarch.cfg` does not
+exist: delete that file to pick up a newer seed.
 
 ## Try it
 

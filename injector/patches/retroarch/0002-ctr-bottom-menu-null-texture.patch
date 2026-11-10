@@ -1,0 +1,41 @@
+ctr: do not draw the bottom menu without its texture
+
+If bottom_menu.png is missing, ctr_load_bottom_texture() fails and the
+bottom screen stays in the "asset not found" state, but opening the menu
+switched it to CTR_BOTTOM_MENU_SELECT anyway and the renderer dereferenced
+the NULL texture: RetroArch crashed the first time the touch screen was
+used. Stay in CTR_BOTTOM_MENU_NOT_AVAILABLE instead.
+
+Applies to RetroArch v1.22.2 (RETROARCH_REF in versions.env).
+
+diff --git a/gfx/drivers/ctr_gfx.c b/gfx/drivers/ctr_gfx.c
+index a2662249..81d3d06d 100644
+--- a/gfx/drivers/ctr_gfx.c
++++ b/gfx/drivers/ctr_gfx.c
+@@ -1349,11 +1349,15 @@ static void ctr_bottom_menu_control(void* data,
+       ctr->refresh_bottom_menu = true;
+    }
+ 
++   /* Without bottom_menu.png the menu cannot be drawn: keep the
++    * "asset not found" screen instead of rendering a NULL texture. */
++   if (!ctr->bottom_textures[CTR_TEXTURE_BOTTOM_MENU].texture)
++      ctr->bottom_menu = CTR_BOTTOM_MENU_NOT_AVAILABLE;
+ #ifdef HAVE_MENU
+-   if (menu_state_get_ptr()->flags & MENU_ST_FLAG_ALIVE)
++   else if (menu_state_get_ptr()->flags & MENU_ST_FLAG_ALIVE)
+       ctr->bottom_menu = CTR_BOTTOM_MENU_SELECT;
+-   else
+ #endif
++   else
+       ctr->bottom_menu = CTR_BOTTOM_MENU_DEFAULT;
+ 
+    if (ctr->prev_bottom_menu != ctr->bottom_menu)
+@@ -1499,6 +1503,8 @@ static void ctr_render_bottom_screen(void *data)
+             o                      =
+                &ctr->bottom_textures[CTR_TEXTURE_BOTTOM_MENU];
+             texture                = (ctr_texture_t *)o->texture;
++            if (!texture)
++               break;
+ 
+             ctrGuSetTexture(GPU_TEXUNIT0,
+                   VIRT_TO_PHYS(texture->data),
