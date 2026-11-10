@@ -4,7 +4,7 @@
 # Package layout (same for .deb and .rpm):
 #   /opt/3ds-new-retroarch-forwarder/lib/forwarder3ds/   Python package
 #   /opt/3ds-new-retroarch-forwarder/vendor/             PySide6, when the distro lacks it
-#   /opt/3ds-new-retroarch-forwarder/toolchain/          makerom, bannertool, stub .elf
+#   /opt/3ds-new-retroarch-forwarder/toolchain/          makerom, bannertool, RetroArch bases
 #   /usr/bin/3ds-forwarder[-gui]                         launchers (system python3)
 #   /usr/share/applications|icons|metainfo               desktop integration
 
@@ -57,12 +57,14 @@ package_version() {
     fi
 }
 
-# A toolchain directory must hold both programs and the stub.
+# A toolchain directory must hold both programs and at least one base.
 check_toolchain() {
     local dir="$1" item
-    for item in bin/makerom bin/bannertool stub/3ds-forwarder-stub.elf; do
+    for item in bin/makerom bin/bannertool; do
         [[ -f "${dir}/${item}" ]] || die "Toolchain ${dir} lacks ${item}"
     done
+    compgen -G "${dir}/bases/*/retroarch.elf" > /dev/null \
+        || die "Toolchain ${dir} has no RetroArch base"
 }
 
 # Write a launcher that runs a module with the system interpreter.

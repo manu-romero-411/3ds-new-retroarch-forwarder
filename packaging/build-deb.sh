@@ -3,7 +3,7 @@
 #
 #   packaging/build-deb.sh --toolchain DIR --suffix debian13 [--vendor DIR]
 #
-# --toolchain   directory made by toolchain/build-tools.sh + build-stub.sh
+# --toolchain   directory made by toolchain/build-tools.sh + build-base.sh
 # --suffix      distribution tag appended to the version (debian13, ubuntu24.04...)
 # --vendor      bundled Python packages (PySide6) for releases without them;
 #               the package then depends on the Qt runtime libraries instead

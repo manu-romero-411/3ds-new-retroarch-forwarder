@@ -1,5 +1,5 @@
 # On a new v* tag pointing at main: lint and test, work out the target
-# distributions, compile the stub once, build and test one package per
+# distributions, compile the RetroArch bases once, build and test one package per
 # distribution and architecture (each inside its own container, on a runner
 # of that architecture) and publish a GitHub release with all of them plus
 # install.sh. Plain commits do not trigger it. It can also be started by
@@ -48,12 +48,6 @@ jobs:
             exit 1
           fi
 
-      - name: Stub core table matches cores.json
-        run: |
-          python3 scripts/generate_cores_table.py src/forwarder3ds/data/cores.json \
-            | diff -u stub/source/cores_table.h - \
-            || { echo "::error::Regenerate stub/source/cores_table.h from cores.json"; exit 1; }
-
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
@@ -87,31 +81,31 @@ jobs:
         id: targets
         run: python3 packaging/targets.py
 
-  stub:
-    name: Compile the stub (devkitARM)
+  bases:
+    name: Compile the RetroArch bases (devkitARM)
     needs: check
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
         with:
           ref: refs/tags/${{ env.TAG }}
-          fetch-depth: 0  # git describe names the stub's revision
 
-      - name: Build
+      - name: Build every core in retroarch/cores
         run: |
-          packaging/toolchain/build-stub.sh build/stub-toolchain
-          mkdir -p dist-stub
-          cp build/stub-toolchain/stub/3ds-forwarder-stub.elf build/stub-toolchain/VERSIONS dist-stub/
+          packaging/toolchain/build-base.sh build/bases-toolchain all
+          cp build/bases-toolchain/VERSIONS build/bases-toolchain/bases/VERSIONS
+          mkdir -p dist-bases
+          tar -C build/bases-toolchain -czf dist-bases/retroarch-bases.tar.gz bases
 
       - uses: actions/upload-artifact@v7
         with:
-          name: stub
-          path: dist-stub/*
+          name: bases
+          path: dist-bases/*
           if-no-files-found: error
 
   package:
     name: ${{ matrix.name }}
-    needs: [check, targets, stub]
+    needs: [check, targets, bases]
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -124,8 +118,8 @@ jobs:
 
       - uses: actions/download-artifact@v8
         with:
-          name: stub
-          path: dist-stub
+          name: bases
+          path: dist-bases
 
       - name: Build in ${{ matrix.image }}
         run: |
@@ -166,14 +160,14 @@ jobs:
 
       - uses: actions/download-artifact@v8
         with:
-          name: stub
-          path: dist-stub
+          name: bases
+          path: dist-bases
 
       - name: Assets and checksums
         run: |
-          cp install.sh dist-stub/3ds-forwarder-stub.elf dist/
+          cp install.sh dist-bases/retroarch-bases.tar.gz dist/
           cd dist
-          sha256sum ./*.deb ./*.rpm install.sh 3ds-forwarder-stub.elf | sed 's| \./| |' > SHA256SUMS
+          sha256sum ./*.deb ./*.rpm install.sh retroarch-bases.tar.gz | sed 's| \./| |' > SHA256SUMS
           ls -l
 
       - uses: softprops/action-gh-release@v3
@@ -183,6 +177,6 @@ jobs:
             dist/*.deb
             dist/*.rpm
             dist/install.sh
-            dist/3ds-forwarder-stub.elf
+            dist/retroarch-bases.tar.gz
             dist/SHA256SUMS
           generate_release_notes: true

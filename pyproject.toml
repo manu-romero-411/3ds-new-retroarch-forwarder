@@ -5,13 +5,13 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "3ds-new-retroarch-forwarder"
 dynamic = ["version"]
-description = "Build 3DS forwarder CIAs that launch one game with its RetroArch core"
+description = "Build standalone 3DS CIAs of one game, each with its own RetroArch core"
 readme = "README.md"
 license = "GPL-3.0-only"
 license-files = ["LICENSE"]
 requires-python = ">=3.11"
 authors = [{ name = "manu-romero-411" }]
-keywords = ["3ds", "retroarch", "forwarder", "cia", "luma3ds", "steamgriddb"]
+keywords = ["3ds", "retroarch", "injector", "cia", "luma3ds", "steamgriddb"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",
@@ -52,6 +52,7 @@ where = ["src"]
 "forwarder3ds.data" = [
     "*.json",
     "*.rsf",
+    "*.cfg",
     "*.png",
     "icons/*.svg",
     "jingles/*",

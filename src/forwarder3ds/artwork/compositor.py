@@ -12,7 +12,7 @@ builds that image out of two optional SteamGridDB assets:
 
 Either input may be missing (e.g. only a logo was picked, or neither was),
 in which case a plain placeholder background is used so there is always a
-valid image to preview and to hand to ``build_forwarder``.
+valid image to preview and to hand to ``build_game``.
 
 A *platform frame* (see ``core/catalog.py``) is drawn over the finished
 banner by the build itself (``builder.media.prepare_banner_image``). The

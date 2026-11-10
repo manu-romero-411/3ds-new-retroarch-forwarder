@@ -1,10 +1,9 @@
 """Placeholder icon, banner and silent jingle.
 
-Used whenever a forwarder has no icon or banner of its own, and by the
-stub's ``make cia`` target (a loose stub CIA for testing). Standard library
-only, so it also runs from the stub Makefile without any dependency::
+Used whenever a game has no icon or banner of its own. Standard library
+only, so it also runs without any dependency::
 
-    PYTHONPATH=src python3 -m forwarder3ds.builder.placeholders --out-dir stub
+    PYTHONPATH=src python3 -m forwarder3ds.builder.placeholders --out-dir DIR
 """
 
 from __future__ import annotations
@@ -70,7 +69,7 @@ def ensure_placeholder_assets(out_dir: Path) -> tuple[Path, Path, Path]:
 
 
 def main() -> None:
-    """Command line entry point (used by ``stub/Makefile``)."""
+    """Command line entry point."""
     parser = argparse.ArgumentParser(description="Write placeholder icon/banner/audio files.")
     parser.add_argument("--out-dir", type=Path, required=True, help="Destination folder")
     args = parser.parse_args()

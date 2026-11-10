@@ -1,11 +1,11 @@
-"""The forwarder as it will look on a 3DS's HOME menu.
+"""The game as it will look on a 3DS's HOME menu.
 
 Draws the icon and the banner *behind* a picture of a 3DS whose two screens
 are transparent holes (``forwarder3ds/data/3ds_frame.png``), so they show through:
 
 * top screen: the banner (256x128, platform frame included) centred on a
   plain white background;
-* bottom screen: a made-up icon grid, two rows high, with the forwarder's icon
+* bottom screen: a made-up icon grid, two rows high, with the game's icon
   in it among empty placeholder tiles.
 
 The picture is composed at its native size, where the screen holes are exactly
@@ -36,7 +36,7 @@ GRID_ROWS = 2
 GRID_COLUMNS = 5
 GRID_GAP_X = 14
 GRID_GAP_Y = 18
-# The forwarder's cell: first row, middle column.
+# The game's cell: first row, middle column.
 ICON_CELL = (0, GRID_COLUMNS // 2)
 TILE_RADIUS = 6
 
@@ -74,7 +74,7 @@ class ConsolePreview(QWidget):
         policy = QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         policy.setHeightForWidth(True)
         self.setSizePolicy(policy)
-        self.setToolTip("How the forwarder will look on the 3DS HOME menu.")
+        self.setToolTip("How the game will look on the 3DS HOME menu.")
 
         self._compose()
 

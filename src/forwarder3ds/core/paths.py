@@ -5,8 +5,8 @@ User files follow the XDG base directory spec (``~/.config``,
 installed code, so the package can live in a read-only prefix such as
 ``/opt/3ds-new-retroarch-forwarder``.
 
-The native toolchain (``makerom``, ``bannertool`` and the pre-built stub
-``.elf``) is looked up in a ``toolchain/`` directory, see
+The native toolchain (``makerom``, ``bannertool`` and the pre-built
+RetroArch bases) is looked up in a ``toolchain/`` directory, see
 :func:`toolchain_dirs` for the search order.
 """
 

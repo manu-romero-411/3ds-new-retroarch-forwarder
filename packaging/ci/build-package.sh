@@ -7,8 +7,9 @@
 #
 # Runs as root in a throw-away container whose system and architecture are
 # the package's: installs the build dependencies, compiles makerom and
-# bannertool there, adds the stub from STUB_DIR (default: dist-stub/, built
-# once by the workflow) and builds the package into dist/. When the
+# bannertool there, adds the RetroArch bases from BASES_DIR (default:
+# dist-bases/retroarch-bases.tar.gz, built once by the workflow) and builds
+# the package into dist/. When the
 # distribution has no PySide6 (Ubuntu 24.04), PySide6-Essentials is bundled.
 # HOST_UID/HOST_GID, if set, become the owners of build/ and dist/;
 # PACKAGE_VERSION (the tag without "v") is passed on to the package build.
@@ -17,7 +18,7 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${HERE}/../.." && pwd)"
 readonly HERE REPO_ROOT
-readonly STUB_NAME="3ds-forwarder-stub.elf"
+readonly BASES_ARCHIVE="retroarch-bases.tar.gz"
 readonly PYSIDE_VERSION="${PYSIDE_VERSION:-6.12.0}"
 
 log() {
@@ -103,8 +104,8 @@ prune_pyside6() {
 main() {
     [[ $# -eq 2 ]] || die "Usage: build-package.sh deb|rpm SUFFIX"
     local format="$1" suffix="$2" arch toolchain vendor=""
-    local stub_dir="${STUB_DIR:-${REPO_ROOT}/dist-stub}"
-    [[ -f "${stub_dir}/${STUB_NAME}" ]] || die "Stub not found in ${stub_dir}"
+    local bases_dir="${BASES_DIR:-${REPO_ROOT}/dist-bases}"
+    [[ -f "${bases_dir}/${BASES_ARCHIVE}" ]] || die "${BASES_ARCHIVE} not found in ${bases_dir}"
     arch="$(uname -m)"
     toolchain="${REPO_ROOT}/build/toolchain-${suffix}-${arch}"
 
@@ -116,9 +117,10 @@ main() {
 
     rm -rf "${toolchain}"
     "${REPO_ROOT}/packaging/toolchain/build-tools.sh" "${toolchain}"
-    install -D -m 0644 "${stub_dir}/${STUB_NAME}" "${toolchain}/stub/${STUB_NAME}"
-    if [[ -f "${stub_dir}/VERSIONS" ]]; then
-        grep '^stub=' "${stub_dir}/VERSIONS" >> "${toolchain}/VERSIONS" || true
+    tar -xzf "${bases_dir}/${BASES_ARCHIVE}" -C "${toolchain}"
+    if [[ -f "${toolchain}/bases/VERSIONS" ]]; then
+        cat "${toolchain}/bases/VERSIONS" >> "${toolchain}/VERSIONS"
+        rm "${toolchain}/bases/VERSIONS"
     fi
 
     case "${format}" in

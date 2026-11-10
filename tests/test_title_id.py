@@ -9,8 +9,8 @@ from pathlib import Path
 import pytest
 
 from forwarder3ds.core.title_id import (
-    FORWARDER_NAMESPACE,
-    ForwarderIdentity,
+    GAME_NAMESPACE,
+    GameIdentity,
     TitleIdCollisionError,
     TitleIdRegistry,
     generate_title_id,
@@ -19,15 +19,17 @@ from forwarder3ds.core.title_id import (
     unique_id_to_title_id,
 )
 
-SAMPLE = ForwarderIdentity(
+SAMPLE = GameIdentity(
     name="Super Mario World",
     short_name="SMW",
     long_name="Super Mario World (SNES)",
     manufacturer="Nintendo",
     core="snes9x",
-    rom_path="roms/snes/Super Mario World.sfc",
+    data_dir="sdmc:/saves/snes/Super Mario World",
 )
-OTHER = ForwarderIdentity("Other", "OG", "Other Game", "Someone", "snes9x", "roms/snes/o.sfc")
+OTHER = GameIdentity(
+    "Other", "OG", "Other Game", "Someone", "snes9x", "sdmc:/saves/snes/Other Game"
+)
 
 
 def test_same_inputs_same_id(tmp_path: Path) -> None:
@@ -35,7 +37,7 @@ def test_same_inputs_same_id(tmp_path: Path) -> None:
     first = generate_title_id(SAMPLE, set(), registry)
     second = generate_title_id(SAMPLE, set(), registry)
     assert first == second
-    assert first[0] & 0xF0000 == FORWARDER_NAMESPACE
+    assert first[0] & 0xF0000 == GAME_NAMESPACE
     assert registry.preview(SAMPLE, set()) == first[0]
     assert TitleIdRegistry.load(registry.path).assigned_ids() == {first[0]}
 
@@ -45,7 +47,7 @@ def test_title_id_round_trip() -> None:
     assert unique_id_to_title_id(0xF1234) == 0x000400000F123400
 
 
-def test_manual_id_taken_by_other_forwarder(tmp_path: Path) -> None:
+def test_manual_id_taken_by_other_game(tmp_path: Path) -> None:
     registry = TitleIdRegistry(path=tmp_path / "r.json")
     unique_id, _ = generate_title_id(SAMPLE, set(), registry)
     with pytest.raises(TitleIdCollisionError):
@@ -55,7 +57,7 @@ def test_manual_id_taken_by_other_forwarder(tmp_path: Path) -> None:
 def test_replacing_keeps_the_id(tmp_path: Path) -> None:
     registry = TitleIdRegistry(path=tmp_path / "r.json")
     unique_id, _ = generate_title_id(SAMPLE, set(), registry)
-    edited = ForwarderIdentity(**{**SAMPLE.__dict__, "short_name": "SMW2"})
+    edited = GameIdentity(**{**SAMPLE.__dict__, "short_name": "SMW2"})
     with pytest.raises(TitleIdCollisionError):
         preview_unique_id(edited, set(), registry, unique_id)
     kept, _ = generate_title_id(

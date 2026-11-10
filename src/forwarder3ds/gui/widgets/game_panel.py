@@ -1,8 +1,12 @@
-"""Game panel: which core launches which ROM, and the names on the HOME menu.
+"""Game panel: which ROM goes in the CIA, for which console and core, and its names.
 
 These are the fields the Title ID is derived from. The panel only collects
 and (re)populates them; the window computes the Title ID preview and runs
 the build.
+
+Fields the user has not touched follow the ones they derive from: the
+console follows the ROM's extension, the core follows the console, the
+names follow the ROM's file name and the save folder follows the long name.
 """
 
 from __future__ import annotations
@@ -10,11 +14,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Signal
 from PySide6.QtGui import QPalette
 from PySide6.QtWidgets import (
     QComboBox,
-    QCompleter,
+    QFileDialog,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
@@ -25,52 +29,54 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from forwarder3ds.core.cores import CoreRegistry
-from forwarder3ds.core.names import suggest_title
+from forwarder3ds.core.names import save_folder_name, suggest_title
 from forwarder3ds.core.settings import DEFAULT_MANUFACTURER
-from forwarder3ds.gui.dialogs.rom_picker import choose_rom_on_sd
+from forwarder3ds.core.systems import SystemCatalog
 
 
 @dataclass
 class GameFields:
     """The panel's values, stripped."""
 
+    rom: str
+    console: str
     core: str
-    rom_path: str
+    folder: str
     short_name: str
     long_name: str
     manufacturer: str
 
 
-class GamePanel(QWidget):
-    """Core, ROM path on the SD card, SMDH names and manufacturer."""
+class GamePanel(QWidget):  # pylint: disable=too-many-instance-attributes
+    """ROM file, console, core, save folder, SMDH names and manufacturer."""
 
     #: Any edit to a field.
     changed = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self._cores: CoreRegistry | None = None
-        self._sd_card: Path | None = None
+        self._systems: SystemCatalog | None = None
+        self._available_cores: set[str] = set()
         self._default_manufacturer = DEFAULT_MANUFACTURER
-        # The title last derived from the ROM path. A name field that is still
-        # empty or equal to it has not been touched by the user, so it keeps
-        # following the ROM; one that differs is the user's and is left alone.
+        self._last_dir = Path.home()
+        # Last values derived automatically. A field still empty or equal to
+        # its derived value has not been touched by the user, so it keeps
+        # following; one that differs is the user's and is left alone.
         self._suggested_title = ""
+        self._suggested_folder = ""
+        self._suggested_core = ""
 
+        self._rom_edit = QLineEdit()
+        self._rom_edit.setPlaceholderText(self.tr("ROM file on this computer"))
+        self._console_combo = QComboBox()
         self._core_combo = QComboBox()
         self._core_combo.setEditable(True)
         self._core_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
-        # Size to a few characters, not to the longest core title.
-        self._core_combo.setSizeAdjustPolicy(
-            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
-        )
-        self._core_combo.setMinimumContentsLength(12)
-        self._core_combo.lineEdit().setPlaceholderText(self.tr("e.g. snes9x2005"))
-
-        self._rom_edit = QLineEdit()
-        self._rom_edit.setPlaceholderText("roms/snes/Super Mario World.sfc")
-        self._rom_edit.setToolTip(self.tr("Path relative to the root of the 3DS SD card."))
+        self._folder_edit = QLineEdit()
+        self._folder_edit.setPlaceholderText(self.tr("Same as the long name"))
+        self._data_dir_label = QLabel()
+        self._data_dir_label.setForegroundRole(QPalette.ColorRole.PlaceholderText)
+        self._data_dir_label.setWordWrap(True)
         self._long_name_edit = QLineEdit()
         self._long_name_edit.setPlaceholderText(self.tr("Filled from the ROM name"))
         self._long_name_edit.setToolTip(
@@ -86,10 +92,14 @@ class GamePanel(QWidget):
         column.addWidget(self._build_names_group())
         column.addStretch(1)
 
-        self._rom_edit.textChanged.connect(self._autofill_names)
+        self._rom_edit.textChanged.connect(self._on_rom_changed)
+        self._console_combo.currentIndexChanged.connect(self._on_console_changed)
+        self._long_name_edit.textChanged.connect(self._follow_long_name)
         self._core_combo.currentTextChanged.connect(self.changed)
+        self._folder_edit.textChanged.connect(self._show_data_dir)
         for edit in (
             self._rom_edit,
+            self._folder_edit,
             self._short_name_edit,
             self._long_name_edit,
             self._manufacturer_edit,
@@ -101,22 +111,25 @@ class GamePanel(QWidget):
     def _build_game_group(self) -> QGroupBox:
         group = QGroupBox(self.tr("Game"))
         form = QFormLayout(group)
-        form.addRow(self.tr("RetroArch core:"), self._core_combo)
 
-        browse = QPushButton(self.tr("Browse SD…"))
-        browse.setToolTip(self.tr("Pick the ROM on the 3DS SD card (it must be mounted)."))
+        browse = QPushButton(self.tr("Browse…"))
         browse.clicked.connect(self._browse_rom)
         rom_row = QWidget()
         row = QHBoxLayout(rom_row)
         row.setContentsMargins(0, 0, 0, 0)
         row.addWidget(self._rom_edit, 1)
         row.addWidget(browse)
-        form.addRow(self.tr("ROM on the SD card:"), rom_row)
+        form.addRow(self.tr("ROM:"), rom_row)
+        form.addRow(self.tr("Console:"), self._console_combo)
+        form.addRow(self.tr("RetroArch core:"), self._core_combo)
+        form.addRow(self.tr("Save folder:"), self._folder_edit)
+        form.addRow("", self._data_dir_label)
 
         hint = QLabel(
             self.tr(
-                "The forwarder installs the core from sdmc:/retroarch/cores/ on first "
-                "launch if it is not installed yet."
+                "The ROM is packed inside the CIA. Saves, states, core options and the "
+                "game's RetroArch settings stay in its save folder; BIOS files go in "
+                "sdmc:/saves/bios. CD games: a single .chd file."
             )
         )
         hint.setWordWrap(True)
@@ -134,25 +147,28 @@ class GamePanel(QWidget):
 
     # ── Configuration ────────────────────────────────────────────────────
 
-    def set_cores(self, cores: CoreRegistry | None) -> None:
-        """Fill the core list (``None``: the catalog could not be read)."""
-        current = self.fields().core
-        self._cores = cores
+    def set_catalogs(self, systems: SystemCatalog | None, available_cores: list[str]) -> None:
+        """Fill the console and core lists (``systems`` ``None``: the catalog is unreadable)."""
+        current = self.fields()
+        self._systems = systems
+        self._available_cores = set(available_cores)
+
+        self._console_combo.blockSignals(True)
+        self._console_combo.clear()
+        self._console_combo.addItem(self.tr("Choose…"), "")
+        for system in sorted(systems or [], key=lambda item: item.name.casefold()):
+            self._console_combo.addItem(f"{system.name} ({system.console})", system.console)
+        self._select_console(current.console)
+        self._console_combo.blockSignals(False)
+
+        cores = sorted({system.core for system in systems or []} | self._available_cores)
         self._core_combo.blockSignals(True)
         self._core_combo.clear()
-        entries = sorted(cores or [], key=lambda entry: entry.title.casefold())
-        for entry in entries:
-            self._core_combo.addItem(f"{entry.title} ({entry.libretro_name})", entry.libretro_name)
-        completer = QCompleter([entry.libretro_name for entry in entries], self)
-        completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
-        completer.setFilterMode(Qt.MatchFlag.MatchContains)
-        self._core_combo.setCompleter(completer)
-        self._select_core(current)
+        for core in cores:
+            note = "" if core in self._available_cores else self.tr(" — no base built")
+            self._core_combo.addItem(core + note, core)
+        self._select_core(current.core)
         self._core_combo.blockSignals(False)
-
-    def set_sd_card(self, sd_card: Path | None) -> None:
-        """Use this SD card root for *Browse SD…* (``None``: detect mounted cards)."""
-        self._sd_card = sd_card
 
     def set_default_manufacturer(self, manufacturer: str) -> None:
         """Manufacturer used by :meth:`reset` and when the field is left empty."""
@@ -177,53 +193,104 @@ class GamePanel(QWidget):
             self._core_combo.setCurrentIndex(-1)
             self._core_combo.setEditText(core)
 
+    def _select_console(self, console: str) -> None:
+        index = self._console_combo.findData(console)
+        self._console_combo.setCurrentIndex(max(index, 0))
+
     def fields(self) -> GameFields:
         """Current values; empty names fall back like the CLI does."""
         long_name = self._long_name_edit.text().strip()
         return GameFields(
+            rom=self._rom_edit.text().strip(),
+            console=str(self._console_combo.currentData() or ""),
             core=self._selected_core(),
-            rom_path=self._rom_edit.text().strip(),
+            folder=self._folder_edit.text().strip() or save_folder_name(long_name),
             short_name=self._short_name_edit.text().strip() or long_name,
             long_name=long_name,
             manufacturer=self._manufacturer_edit.text().strip() or self._default_manufacturer,
         )
 
-    def missing(self) -> str | None:
+    def missing(self) -> str | None:  # pylint: disable=too-many-return-statements
         """What must still be filled in before building, or ``None``."""
         fields = self.fields()
+        if not fields.rom:
+            return self.tr("Choose the ROM.")
+        if not Path(fields.rom).is_file():
+            return self.tr("The ROM file does not exist.")
+        if not fields.console:
+            return self.tr("Choose the console.")
         if not fields.core:
             return self.tr("Pick a RetroArch core.")
-        if self._cores is not None and self._cores.get(fields.core) is None:
-            return self.tr("Core '{core}' is not in the core catalog.").format(core=fields.core)
-        if not fields.rom_path:
-            return self.tr("Enter the ROM path on the SD card.")
+        if fields.core not in self._available_cores:
+            return self.tr(
+                "There is no RetroArch base for '{core}'. See Settings › Toolchain."
+            ).format(core=fields.core)
         if not fields.long_name:
             return self.tr("Enter the long name.")
+        if save_folder_name(fields.folder) != fields.folder:
+            return self.tr("The save folder name has characters an SD card cannot hold.")
         return None
 
     def set_fields(self, fields: GameFields) -> None:
         """Fill every field (e.g. from a loaded CIA). ``changed`` fires as usual."""
+        self._rom_edit.setText(fields.rom)
+        self._select_console(fields.console)
         self._select_core(fields.core)
-        self._rom_edit.setText(fields.rom_path)
         self._short_name_edit.setText(fields.short_name)
         self._long_name_edit.setText(fields.long_name)
+        self._folder_edit.setText(fields.folder)
         self._manufacturer_edit.setText(fields.manufacturer)
 
     def reset(self) -> None:
         """Back to an empty form."""
-        self._suggested_title = ""
-        self.set_fields(GameFields("", "", "", "", self._default_manufacturer))
+        self._suggested_title = self._suggested_folder = self._suggested_core = ""
+        self.set_fields(GameFields("", "", "", "", "", "", self._default_manufacturer))
 
     # ── Behaviour ────────────────────────────────────────────────────────
 
     def _browse_rom(self) -> None:
-        rom_path = choose_rom_on_sd(self, self._sd_card)
-        if rom_path:
-            self._rom_edit.setText(rom_path)
+        extensions = sorted({ext for system in self._systems or [] for ext in system.extensions})
+        roms = " ".join(f"*.{ext}" for ext in extensions)
+        path, _filter = QFileDialog.getOpenFileName(
+            self,
+            self.tr("Choose the ROM"),
+            str(self._last_dir),
+            self.tr("ROMs ({patterns});;All files (*)").format(patterns=roms or "*"),
+        )
+        if path:
+            self._last_dir = Path(path).parent
+            self._rom_edit.setText(path)
 
-    def _autofill_names(self, rom_path: str) -> None:
-        """Keep the name fields the user has not edited in sync with the ROM's file name."""
-        previous, self._suggested_title = self._suggested_title, suggest_title(rom_path)
+    def _on_rom_changed(self, rom: str) -> None:
+        """Follow the ROM: console from its extension, names from its file name."""
+        previous, self._suggested_title = self._suggested_title, suggest_title(Path(rom).name)
         for edit in (self._long_name_edit, self._short_name_edit):
             if edit.text() in ("", previous):
                 edit.setText(self._suggested_title)
+        guessed = self._systems.guess(Path(rom)) if self._systems and rom else None
+        if guessed is not None:
+            self._select_console(guessed.console)
+
+    def _on_console_changed(self) -> None:
+        """Follow the console with its default core, unless the core was picked by hand."""
+        console = str(self._console_combo.currentData() or "")
+        system = self._systems.get(console) if self._systems else None
+        default = system.core if system else ""
+        previous, self._suggested_core = self._suggested_core, default
+        if self._selected_core() in ("", previous):
+            self._select_core(default)
+        self._show_data_dir()
+        self.changed.emit()
+
+    def _follow_long_name(self, long_name: str) -> None:
+        previous, self._suggested_folder = self._suggested_folder, save_folder_name(long_name)
+        if self._folder_edit.text() in ("", previous):
+            self._folder_edit.setText(self._suggested_folder if long_name.strip() else "")
+        self._show_data_dir()
+
+    def _show_data_dir(self) -> None:
+        fields = self.fields()
+        if fields.console and fields.long_name:
+            self._data_dir_label.setText(f"sdmc:/saves/{fields.console}/{fields.folder}")
+        else:
+            self._data_dir_label.setText("")

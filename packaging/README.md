@@ -1,9 +1,10 @@
 # Packaging
 
-A forwarder build runs two native programs, `makerom` and `bannertool`, and
-repackages a stub compiled with devkitARM. The packages therefore ship a
-small **toolchain** next to the Python code, built for each distribution and
-architecture, so nothing else (and no Docker) is needed at run time.
+A game build runs two native programs, `makerom` and `bannertool`, and
+repackages one of the RetroArch **bases** (RetroArch + one core, compiled
+with devkitARM). The packages therefore ship a **toolchain** next to the
+Python code, built for each distribution and architecture, so nothing else
+(and no Docker) is needed at run time.
 
 ## Layout on disk
 
@@ -13,8 +14,8 @@ architecture, so nothing else (and no Docker) is needed at run time.
 |---|---|
 | `/opt/3ds-new-retroarch-forwarder/lib/forwarder3ds/` | Python package (byte-compiled on install) |
 | `/opt/3ds-new-retroarch-forwarder/toolchain/bin/` | `makerom`, `bannertool` |
-| `/opt/3ds-new-retroarch-forwarder/toolchain/stub/` | `3ds-forwarder-stub.elf` |
-| `/opt/3ds-new-retroarch-forwarder/toolchain/VERSIONS` | source revisions of the three |
+| `/opt/3ds-new-retroarch-forwarder/toolchain/bases/<core>/` | `retroarch.elf`, `base.env`, assets |
+| `/opt/3ds-new-retroarch-forwarder/toolchain/VERSIONS` | source revisions of all of them |
 | `/opt/3ds-new-retroarch-forwarder/vendor/` | PySide6, only where the distribution lacks it |
 | `/usr/bin/3ds-forwarder`, `/usr/bin/3ds-forwarder-gui` | launchers using the system `python3` |
 | `/usr/share/applications/io.github.manu_romero_411.forwarder3ds.desktop` | menu entry |
@@ -57,7 +58,10 @@ then plays through `pw-play`, `paplay` or `aplay`.
 
 - **makerom** from [3DSGuy/Project_CTR](https://github.com/3DSGuy/Project_CTR) (MIT);
 - **bannertool** from [CyberYoshi64/bannertool](https://github.com/CyberYoshi64/bannertool) (MIT);
-- the **stub** from `stub/` with the `devkitpro/devkitarm` image.
+- the **RetroArch bases**: [RetroArch](https://github.com/libretro/RetroArch)
+  (GPL-3.0) patched with `retroarch/patches/` and linked with each core of
+  `retroarch/cores/` (each core keeps its own licence), with the
+  `devkitpro/devkitarm` image.
 
 Their licences are installed in `toolchain/LICENSES/`.
 
@@ -66,11 +70,12 @@ Their licences are installed in `toolchain/LICENSES/`.
 ```bash
 # Toolchain for this machine, found automatically by a git checkout:
 packaging/toolchain/build-tools.sh toolchain        # makerom + bannertool
-packaging/toolchain/build-stub.sh toolchain         # stub, via docker/podman
+packaging/toolchain/build-base.sh toolchain all     # bases, via docker/podman
 
 # A package for this machine's distribution (as root, ideally in a container
-# of the target distribution; the stub comes from dist-stub/):
-mkdir -p dist-stub && cp toolchain/stub/3ds-forwarder-stub.elf dist-stub/
+# of the target distribution; the bases come from dist-bases/):
+mkdir -p dist-bases && cp toolchain/VERSIONS toolchain/bases/VERSIONS
+tar -C toolchain -czf dist-bases/retroarch-bases.tar.gz bases
 packaging/ci/build-package.sh deb debian13           # in debian:13
 packaging/ci/build-package.sh rpm fc43               # in fedora:43
 packaging/ci/smoke-test.sh dist/<package>            # in a clean container
@@ -99,19 +104,18 @@ reaches each kind of installation like this:
 ordinary commits do not trigger it. It then:
 
 1. checks that the tag points at a commit of `main` and looks like a
-   version (`v1.2.3`), that `stub/source/cores_table.h` matches `cores.json`, and
-   runs pylint, pytest and shellcheck;
+   version (`v1.2.3`), and runs pylint, pytest and shellcheck;
 2. works out the target distributions (`targets.py`);
-3. compiles the stub once (it is an ARM11 binary for the console, the same
-   whatever builds it);
+3. compiles the RetroArch bases once (ARM11 binaries for the console, the
+   same whatever builds them);
 4. for every distribution and architecture, on a GitHub runner of that
    architecture (`ubuntu-24.04` / `ubuntu-24.04-arm`) and inside a container
    of that distribution: compiles `makerom` and `bannertool`, builds the
-   package, then installs it in a clean container, **builds a real forwarder
+   package, then installs it in a clean container, **builds a real game CIA
    with it**, reads it back, opens the main window off-screen and removes the
    package again;
-5. publishes a GitHub release with every package, `install.sh`, the stub and
-   a `SHA256SUMS` file.
+5. publishes a GitHub release with every package, `install.sh`,
+   `retroarch-bases.tar.gz` and a `SHA256SUMS` file.
 
 The maintainer field can be changed with the repository variable
 `PACKAGE_MAINTAINER`.
@@ -122,8 +126,8 @@ For systems without a matching package (immutable ones such as Fedora
 Atomic, Bazzite or SteamOS, Arch, openSUSE...). It uses podman if present or
 installs Docker, compiles `makerom` and `bannertool` in a container of the
 same distribution and version as the host (Debian, Ubuntu, Fedora and their
-derivatives) or statically in Alpine otherwise, compiles the stub with
-devkitARM (falling back to the release's `3ds-forwarder-stub.elf`), and
+derivatives) or statically in Alpine otherwise, compiles the RetroArch bases
+with devkitARM (falling back to the release's `retroarch-bases.tar.gz`), and
 installs the program in a private virtual environment with the toolchain
 next to it. See `./install.sh --help`.
 

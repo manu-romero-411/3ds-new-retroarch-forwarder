@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# Build single-game ("injected") RetroArch bases: one RetroArch 3DS ELF per
-# core, statically linked and patched with injector/patches/retroarch/.
+# Build the RetroArch bases: one RetroArch 3DS ELF per core, statically
+# linked and patched with retroarch/patches/ for single-game CIAs.
 #
 #   packaging/toolchain/build-base.sh OUT_DIR CORE [CORE...]
+#   packaging/toolchain/build-base.sh OUT_DIR all
 #
-# CORE is a recipe in injector/cores/<CORE>.env. For each one this writes
+# CORE is a recipe in retroarch/cores/<CORE>.env. For each one this writes
 #   OUT_DIR/bases/<CORE>/retroarch.elf   patched RetroArch + core
 #   OUT_DIR/bases/<CORE>/base.env        system mode and source revisions
 #   OUT_DIR/bases/<CORE>/{icon,banner}.png, audio.wav   RetroArch's defaults
@@ -21,8 +22,8 @@ REPO_ROOT="$(cd "${HERE}/../.." && pwd)"
 readonly HERE REPO_ROOT
 # shellcheck source=packaging/toolchain/versions.env
 source "${HERE}/versions.env"
-readonly RECIPES_DIR="${REPO_ROOT}/injector/cores"
-readonly PATCHES_DIR="${REPO_ROOT}/injector/patches/retroarch"
+readonly RECIPES_DIR="${REPO_ROOT}/retroarch/cores"
+readonly PATCHES_DIR="${REPO_ROOT}/retroarch/patches"
 # Current devkitPro ships libctru 2.x, with picasso and bin2s in tools/bin.
 RA_MAKE_FLAGS=(-f Makefile.ctr USE_CTRULIB_2=1)
 # A single-game CIA has no use for networking (netplay, updaters,
@@ -112,7 +113,7 @@ ra_make_var() {
 build_core() {
     local work="$1" recipe="$2" out_dir="$3" ra_dir="$1/RetroArch"
     local CORE_NAME CORE_REPO CORE_REF CORE_SUBDIR CORE_MAKEFILE CORE_LIB
-    # shellcheck source=injector/cores/gambatte.env
+    # shellcheck source=retroarch/cores/gambatte.env
     source "${recipe}"
     local core_dir="${work}/cores/${CORE_NAME}" dest="${out_dir}/bases/${CORE_NAME}"
     local jobs
@@ -158,7 +159,7 @@ build_here() {
 
     # Validate every recipe before the long RetroArch checkout.
     for core in "$@"; do
-        [[ -f "${RECIPES_DIR}/${core}.env" ]] || die "No recipe: injector/cores/${core}.env"
+        [[ -f "${RECIPES_DIR}/${core}.env" ]] || die "No recipe: retroarch/cores/${core}.env"
     done
 
     mkdir -p "${work}"
@@ -199,12 +200,24 @@ build_in_container() {
         bash /src/packaging/toolchain/build-base.sh /out "$@"
 }
 
+# Every recipe in retroarch/cores/, by name.
+all_recipes() {
+    local recipe
+    for recipe in "${RECIPES_DIR}"/*.env; do
+        basename "${recipe}" .env
+    done
+}
+
 main() {
-    [[ $# -ge 2 ]] || die "Usage: build-base.sh OUT_DIR CORE [CORE...]"
+    [[ $# -ge 2 ]] || die "Usage: build-base.sh OUT_DIR CORE [CORE...] | all"
     mkdir -p "$1"
     local out_dir
     out_dir="$(cd "$1" && pwd)"
     shift
+    if [[ "$1" == all ]]; then
+        mapfile -t cores < <(all_recipes)
+        set -- "${cores[@]}"
+    fi
     if [[ -n "${DEVKITARM:-}" ]]; then
         build_here "${out_dir}" "$@"
     else

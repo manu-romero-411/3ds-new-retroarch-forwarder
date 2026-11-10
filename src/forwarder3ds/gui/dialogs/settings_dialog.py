@@ -54,7 +54,7 @@ def _hint(text: str) -> QLabel:
 
 
 class GeneralPage(_Page):
-    """Defaults for new forwarders and where files go."""
+    """Defaults for new games and where files go."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -62,7 +62,6 @@ class GeneralPage(_Page):
         self._manufacturer = QLineEdit()
         self._manufacturer.setPlaceholderText(DEFAULT_MANUFACTURER)
         self._output = PathPicker(select_dir=True, placeholder=str(Path.home()))
-        self._sd_card = PathPicker(select_dir=True, placeholder=self.tr("Detect mounted cards"))
         self._registry = PathPicker(
             select_dir=False,
             placeholder=str(paths.default_registry_file()),
@@ -71,22 +70,12 @@ class GeneralPage(_Page):
         form = QFormLayout(self)
         form.addRow(self.tr("Default manufacturer:"), self._manufacturer)
         form.addRow(self.tr("Save new CIAs in:"), self._output)
-        form.addRow(self.tr("3DS SD card:"), self._sd_card)
-        form.addRow(
-            "",
-            _hint(
-                self.tr(
-                    "Browse SD… opens this folder. Leave it empty to look for a mounted card "
-                    "with a 'Nintendo 3DS' folder or boot.firm."
-                )
-            ),
-        )
         form.addRow(self.tr("Title ID registry:"), self._registry)
         form.addRow(
             "",
             _hint(
                 self.tr(
-                    "Every Title ID handed out is recorded here, so two forwarders never "
+                    "Every Title ID handed out is recorded here, so two games never "
                     "share one. Point several computers at the same (synced) file to keep "
                     "that true across them."
                 )
@@ -99,14 +88,12 @@ class GeneralPage(_Page):
             "" if general.manufacturer == DEFAULT_MANUFACTURER else general.manufacturer
         )
         self._output.set_text(general.output_dir)
-        self._sd_card.set_text(general.sd_card)
         self._registry.set_text(general.registry)
 
     def store(self, settings: Settings) -> None:
         general = settings.general
         general.manufacturer = self._manufacturer.text().strip() or DEFAULT_MANUFACTURER
         general.output_dir = self._output.text()
-        general.sd_card = self._sd_card.text()
         general.registry = self._registry.text()
 
 
@@ -173,13 +160,14 @@ class SteamGridDBPage(_Page):
 
 
 class ToolchainPage(_Page):
-    """Where makerom, bannertool, the stub and ffmpeg are; overrides if needed."""
+    """Where makerom, bannertool, the RetroArch bases and ffmpeg are; overrides if needed."""
 
+    # (settings key, label, is a folder)
     _ITEMS = (
-        ("makerom", "makerom:"),
-        ("bannertool", "bannertool:"),
-        ("stub", "Stub (.elf):"),
-        ("ffmpeg", "ffmpeg (optional):"),
+        ("makerom", "makerom:", False),
+        ("bannertool", "bannertool:", False),
+        ("bases", "RetroArch bases:", True),
+        ("ffmpeg", "ffmpeg (optional):", False),
     )
 
     def __init__(self) -> None:
@@ -191,12 +179,14 @@ class ToolchainPage(_Page):
             _hint(
                 self.tr(
                     "The packages and install.sh ship these tools built for this system. "
-                    "Leave a field empty to use what is found automatically (shown in grey)."
+                    "Leave a field empty to use what is found automatically (shown in grey). "
+                    "The bases folder holds one RetroArch build per core "
+                    "(packaging/toolchain/build-base.sh)."
                 )
             )
         )
-        for key, label in self._ITEMS:
-            picker = PathPicker(select_dir=False)
+        for key, label, is_dir in self._ITEMS:
+            picker = PathPicker(select_dir=is_dir)
             picker.edit.textChanged.connect(self._refresh_status)
             self._pickers[key] = picker
             form.addRow(self.tr(label), picker)
@@ -217,7 +207,11 @@ class ToolchainPage(_Page):
     def _refresh_status(self) -> None:
         tools = find_toolchain(self._current())
         if tools.complete:
-            self._status.setText(self.tr("✔ Ready to build forwarders."))
+            self._status.setText(
+                self.tr("✔ Ready. Cores with a base: {cores}").format(
+                    cores=", ".join(tools.available_cores()) or self.tr("none")
+                )
+            )
         else:
             self._status.setText(
                 self.tr("✘ Missing: {items}").format(items=", ".join(tools.missing))

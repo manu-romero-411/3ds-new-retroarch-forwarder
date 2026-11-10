@@ -1,19 +1,34 @@
 # 3ds-new-retroarch-forwarder
 
-Builds one installable **CIA per game** for a 3DS running Luma3DS. Each
-forwarder shows its own icon, banner and jingle on the HOME menu and launches
-the game directly with the matching RetroArch core, **without bundling a
-whole RetroArch** in every CIA (unlike New Super Ultimate Injector).
+A RetroArch **injector** for a 3DS running Luma3DS, in the spirit of New
+Super Ultimate Injector: one installable **CIA per game**, each with its own
+icon, banner and jingle on the HOME menu, its own up-to-date RetroArch build
+and the game itself inside. Each CIA works on its own: it does not need
+RetroArch installed and never touches `sdmc:/retroarch`.
 
-- A stub compiled once with devkitARM is repackaged per game with a RomFS
-  holding the core name and the ROM path, and a **deterministic,
-  collision-checked Title ID**. Nothing is compiled per game.
-- On first launch the forwarder installs the core's CIA from
-  `sdmc:/retroarch/cores/` if it is not installed yet, then jumps to it.
+- A RetroArch **base** per core (RetroArch statically linked with the core
+  and patched for single-game mode, see [`retroarch/`](retroarch/)) is
+  compiled once. Per game it is repackaged with the ROM in its RomFS and a
+  **deterministic, collision-checked Title ID**.
+- Each game keeps **everything in one flat folder** on the SD card:
+
+  ```
+  sdmc:/saves/<console>/<game>/
+  ├── retroarch.cfg       the game's RetroArch settings
+  ├── game.srm            in-game save
+  ├── game.state*         save states (+ thumbnails)
+  └── game.opt            core options
+  sdmc:/saves/bios/       BIOS files shared by every game
+  ```
+
+  `<console>` is Batocera's folder name (`gb`, `snes`, `megadrive`, `psx`...).
+- A trimmed pause menu: the touch screen shows RetroArch's 3DS menu
+  (resume, save state, load state) and the Quick Menu keeps only what makes
+  sense for one game. CD games are single `.chd` files.
 - Artwork comes from **SteamGridDB** (icon, hero and logo; the banner is the
   hero with the logo on top), or from your own image files.
-- Existing forwarders can be opened, edited and rebuilt under the same
-  Title ID, so the new CIA installs over the old one.
+- Existing CIAs can be opened, edited and rebuilt under the same Title ID,
+  so the new CIA installs over the old one (the ROM is read back from it).
 - Graphical interface (PySide6) and a command line with the same features.
 
 ## Install
@@ -28,8 +43,9 @@ sudo apt install ./3ds-new-retroarch-forwarder_*~ubuntu24.04_amd64.deb
 sudo dnf install ./3ds-new-retroarch-forwarder-*.fc43.x86_64.rpm
 ```
 
-It adds *3DS Forwarder* to the application menu. `makerom`, `bannertool` and
-the stub are inside the package, built for that system and architecture.
+It adds *3DS RetroArch Injector* to the application menu. `makerom`,
+`bannertool` and the RetroArch bases are inside the package, built for that
+system and architecture.
 
 **Anything else (Fedora Atomic, Bazzite, SteamOS, Arch, openSUSE...):** use
 `install.sh`. It uses podman if you have it or installs Docker, compiles the
@@ -39,7 +55,7 @@ private virtual environment. Python 3.11+ is required.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/manu-romero-411/3ds-new-retroarch-forwarder/main/install.sh | bash
-# options: --system, --version vX.Y.Z, --static, --download-stub, --no-gui, --uninstall
+# options: --system, --version vX.Y.Z, --static, --download-bases, --no-gui, --uninstall
 ```
 
 See [packaging/README.md](packaging/README.md) for how packages are built.
@@ -52,9 +68,10 @@ See [packaging/README.md](packaging/README.md) for how packages are built.
 
 The window goes from general to specific:
 
-1. **Game** (left): the RetroArch core, the ROM path on the SD card
-   (*Browse SD…* picks it on a mounted card) and the names shown on the HOME
-   menu. The names follow the ROM's file name until you edit them.
+1. **Game** (left): the ROM file, its console and core, the save folder and
+   the names shown on the HOME menu. The console follows the ROM's
+   extension, the core follows the console, the names follow the ROM's file
+   name and the save folder follows the long name, until you edit them.
 2. **Presentation** (middle): the **icon**, the **banner** (SteamGridDB hero
    + logo, or a ready-made image, plus an optional platform frame) and the
    **jingle**, with a play button. *SteamGridDB…* searches by the long name;
@@ -69,19 +86,20 @@ bottom shows what is going on and the log; the status bar shows the file
 being edited and whether the toolchain is ready.
 
 **Settings** holds everything configured once: default manufacturer, output
-folder, SD card folder, Title ID registry, the SteamGridDB key and filters,
+folder, Title ID registry, the SteamGridDB key and filters,
 the toolchain (with overrides) and your own jingle and logo folders.
 
 ## Command line
 
 ```bash
-3ds-forwarder build --core snes9x2005 --rom "roms/snes/Super Mario World (USA).sfc" \
-    --long-name "Super Mario World" --steamgriddb --jingle smw_coin
+3ds-forwarder build --rom "Super Mario World (USA).sfc" --steamgriddb --jingle smw_coin
+3ds-forwarder build --rom "Castlevania (USA).chd" --console psx   # .chd: say which console
+3ds-forwarder build ... --core snes9x2005 --folder "SMW" --long-name "Super Mario World"
 3ds-forwarder build ... --icon icon.png --hero hero.png --logo logo.png --platform-logo snes
-3ds-forwarder build ... --dry-run               # only print the Title ID
+3ds-forwarder build ... --dry-run               # only print the Title ID and save folder
 3ds-forwarder build --from-cia game.cia --short-name "SMW"   # rebuild, same Title ID
-3ds-forwarder inspect game.cia [--extract DIR]  # what a forwarder contains
-3ds-forwarder cores snes                        # cores that can be forwarded
+3ds-forwarder inspect game.cia [--extract DIR]  # what a game CIA contains (and its ROM)
+3ds-forwarder cores                             # consoles, their cores, bases built
 3ds-forwarder media                             # jingles and platform logos
 3ds-forwarder doctor                            # toolchain and SteamGridDB key
 3ds-forwarder config                            # settings (secrets masked)
@@ -110,19 +128,19 @@ with transparency. Other audio files can be used with `--audio` (needs
 ## Deterministic Title IDs
 
 A 3DS Title ID is `(0x00040000 << 32) | (UniqueId << 8) | Variation`; the
-only part a forwarder chooses is the 20-bit `UniqueId`. The RetroArch core
-CIAs already use `0xBAC00`–`0xBACFF` (see `cores.json`), so forwarders never
+only part a game CIA chooses is the 20-bit `UniqueId`. The RetroArch core
+CIAs already use `0xBAC00`–`0xBACFF` (see `cores.json`), so game CIAs never
 touch that block.
 
 The `UniqueId` is derived from a SHA-256 of the fields that identify the
-forwarder (name, short name, long name, manufacturer, core and ROM path),
+game (name, short name, long name, manufacturer, core and save folder),
 inside a block of its own (`0xF0000`–`0xFFFFF`):
 
 - **Deterministic**: the same fields always give the same ID, on any
   machine, without a shared counter.
 - **No known collision**: every ID handed out is recorded in the registry
   with the key that produced it. Seen fields reuse their ID; if a hash lands
-  on an ID used by another forwarder or a core, a deterministic nonce is
+  on an ID used by another game or a core, a deterministic nonce is
   added until a free one is found, so only the colliding game changes.
 
 Nintendo does not publish the ranges of retail titles, so no unofficial tool
@@ -135,7 +153,7 @@ registry file to keep the guarantee across them.
 ```bash
 pip install -e '.[gui,dev]'
 packaging/toolchain/build-tools.sh toolchain   # makerom + bannertool for this machine
-packaging/toolchain/build-stub.sh toolchain    # stub (devkitARM via docker/podman)
+packaging/toolchain/build-base.sh toolchain all  # RetroArch bases (devkitARM via docker/podman)
 3ds-forwarder doctor
 pylint src/forwarder3ds tests scripts packaging/targets.py
 QT_QPA_PLATFORM=offscreen pytest
@@ -154,14 +172,14 @@ git tag v0.3.0 && git push origin v0.3.0
 ```
 src/forwarder3ds/
 ├── cli.py              command line
-├── core/               Title IDs, core catalog, names, SD card, settings, paths
+├── core/               Title IDs, core and console catalogs, names, settings, paths
 ├── ctr/                3DS formats: CIA reader, SMDH/banner decoders, PNG
 ├── builder/            build pipeline, image/audio preparation, toolchain lookup
 ├── artwork/            SteamGridDB client, banner compositor
 ├── gui/                Qt interface (main window, panels, dialogs)
-└── data/               cores.json, RSF template, jingles, logos, icon, 3DS frame
-stub/                   the stub (C, devkitARM); cores_table.h is generated
-scripts/                maintainer tools: refresh cores.json / cores_table.h
+└── data/               cores.json, systems.json, RSF, seed retroarch.cfg, jingles, logos...
+retroarch/              RetroArch patches and core recipes for the bases
+scripts/                maintainer tools: refresh cores.json
 packaging/              toolchain builds, .deb/.rpm, CI scripts, release targets
 install.sh              installer for systems without a package
 ```
@@ -170,20 +188,20 @@ To refresh the core list after a RetroArch update:
 
 ```bash
 python3 scripts/parse_retroarch_cores.py <RetroArch>/pkg/ctr/Makefile.cores > src/forwarder3ds/data/cores.json
-python3 scripts/generate_cores_table.py src/forwarder3ds/data/cores.json > stub/source/cores_table.h
 ```
 
 ### Design notes
 
-- `APP_SYSTEM_MODE_EXT` is declared by the **core's** `.3dsx`, not the stub.
-  For PSX (PCSX ReARMed) check the value of the official build in RetroArch's
-  `pkg/ctr/Makefile.cores` before relying on a different one.
+- Each base records the memory mode (`APP_SYSTEM_MODE`, `APP_SYSTEM_MODE_EXT`)
+  RetroArch's `pkg/ctr/Makefile.cores` gives its core, and every CIA built
+  from it asks for exactly that.
 - No ticket has to be forged: `makerom` writes a valid one, enough to
   install with FBI under Luma3DS (which patches signature checks).
 - The CIA content is stored unencrypted (`EnableCrypt: false`), which is
-  what lets `inspect` and *Open…* read forwarders back.
+  what lets `inspect` and *Open…* read game CIAs back.
 
 ## Licence
 
 GPL-3.0-only. The bundled `makerom` and `bannertool` are MIT-licensed; their
-licences are installed with them.
+licences are installed with them. RetroArch is GPL-3.0; each core keeps its
+own licence (some, such as snes9x, are non-commercial).

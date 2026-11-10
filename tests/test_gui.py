@@ -29,9 +29,14 @@ def test_title_id_follows_the_fields(app: QApplication) -> None:
     window.show()
     app.processEvents()
     # pylint: disable=protected-access
-    window._game._select_core("snes9x2005")
-    window._game._rom_edit.setText("roms/snes/Super Mario World (USA).sfc")
-    assert window._game.fields().long_name == "Super Mario World"
+    window._game._rom_edit.setText("/tmp/roms/Super Mario World (USA).sfc")
+    fields = window._game.fields()
+    assert fields.long_name == "Super Mario World"
+    assert (fields.console, fields.core, fields.folder) == (
+        "snes",
+        "snes9x2005",
+        "Super Mario World",
+    )
     assert window._title_id._title_id_edit.text().startswith("0x000400000F")
     assert window._document.dirty
     window._document.dirty = False

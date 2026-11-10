@@ -1,4 +1,4 @@
-"""Presentation panel: how the forwarder looks and sounds on the HOME menu.
+"""Presentation panel: how the game looks and sounds on the HOME menu.
 
 * **Icon**: from SteamGridDB or a file.
 * **Banner**: a SteamGridDB *hero* (background) with the game's *logo* on

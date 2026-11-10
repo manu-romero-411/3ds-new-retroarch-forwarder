@@ -1,4 +1,4 @@
-"""What "the forwarder being edited" means for the window.
+"""What "the game CIA being edited" means for the window.
 
 A tiny state holder, deliberately free of Qt: which ``.cia`` on disk the
 form is bound to (if any), which Unique ID that binding implies, and
@@ -16,7 +16,7 @@ NEW_DOCUMENT_LABEL = "Creating new CIA\u2026"
 
 @dataclass
 class Document:
-    """The current forwarder: its file, its Title ID and its unsaved-changes flag."""
+    """The current game CIA: its file, its Title ID and its unsaved-changes flag."""
 
     path: Path | None = None
     unique_id: int | None = None

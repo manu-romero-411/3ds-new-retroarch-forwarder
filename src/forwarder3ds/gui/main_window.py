@@ -3,17 +3,19 @@
 Layout, from general to specific::
 
     ┌ toolbar: New · Open… · Save · Save As… · Settings ─────── Title ID ┐
-    │ Game (core, ROM, names) │ Presentation (icon, banner, jingle) │ Preview │
+    │ Game (ROM, console, core, names) │ Presentation (icon, banner, jingle) │ Preview │
     ├ Activity: status · busy indicator · log ──────────────────────────┤
     └ status bar: file being edited · toolchain state ──────────────────┘
 
 Everything that configures the program lives in the Settings window;
-everything about one forwarder lives in the panels. The window owns the
+everything about one game lives in the panels. The window owns the
 document workflow (New / Open / Save / Save As, unsaved changes), the core
-catalog and the Title ID registry used for the live Title ID preview.
+and console catalogs and the Title ID registry used for the live Title ID
+preview.
 
-Loading a CIA never patches it: its fields fill the panels and saving
-rebuilds it from scratch under the Title ID it had.
+Loading a CIA never patches it: its fields fill the panels, its ROM is
+copied out to a temporary folder, and saving rebuilds it from scratch under
+the Title ID it had.
 """
 
 from __future__ import annotations
@@ -39,19 +41,21 @@ from PySide6.QtWidgets import (
 )
 
 from forwarder3ds import __version__
-from forwarder3ds.builder.forwarder import default_cia_filename, make_request
+from forwarder3ds.builder.errors import BuildError
+from forwarder3ds.builder.injector import GameRequest, default_cia_filename, make_request
 from forwarder3ds.builder.toolchain import Toolchain, find_toolchain
 from forwarder3ds.core import paths
 from forwarder3ds.core.cores import DEFAULT_CORES_JSON, CoreCatalogError, CoreRegistry
 from forwarder3ds.core.logs import TagFormatter, get_logger
 from forwarder3ds.core.settings import Settings, load_settings, save_settings
+from forwarder3ds.core.systems import DEFAULT_SYSTEMS_JSON, SystemCatalog, SystemCatalogError
 from forwarder3ds.core.title_id import (
-    ForwarderIdentity,
+    GameIdentity,
     TitleIdCollisionError,
     TitleIdRegistry,
     preview_unique_id,
 )
-from forwarder3ds.ctr.cia import CiaReadError, LoadedForwarder, read_forwarder_cia
+from forwarder3ds.ctr.cia import CiaReadError, LoadedGame, read_game_cia
 from forwarder3ds.gui.bridge import BuildWorker, QtLogHandler
 from forwarder3ds.gui.dialogs.cia_file_dialogs import choose_cia_to_open, choose_cia_to_save
 from forwarder3ds.gui.dialogs.settings_dialog import (
@@ -68,7 +72,7 @@ from forwarder3ds.gui.widgets.presentation_panel import PresentationPanel
 from forwarder3ds.gui.widgets.title_id_bar import TitleIdBar
 
 _log = get_logger("gui")
-APP_TITLE = "3DS Forwarder"
+APP_TITLE = "3DS RetroArch Injector"
 _PREVIEW_MIN_WIDTH = 240
 
 
@@ -87,7 +91,7 @@ def _scrolling(widget: QWidget) -> QScrollArea:
 
 
 class MainWindow(QMainWindow):  # pylint: disable=too-many-instance-attributes
-    """Forwarder editor plus the file workflow and the build."""
+    """Game CIA editor plus the file workflow and the build."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -96,10 +100,11 @@ class MainWindow(QMainWindow):  # pylint: disable=too-many-instance-attributes
         self._document = Document()
         self._tools: Toolchain = find_toolchain(self._settings.toolchain)
         self._cores: CoreRegistry | None = None
+        self._systems: SystemCatalog | None = None
         self._registry: TitleIdRegistry | None = None
         self._worker: BuildWorker | None = None
         self._build_dir: Path | None = None
-        # Files extracted from a loaded CIA (its jingle) while it is the document.
+        # Files extracted from a loaded CIA (its ROM, jingle) while it is the document.
         self._loaded_dir: Path | None = None
 
         self._game = GamePanel()
@@ -235,10 +240,10 @@ class MainWindow(QMainWindow):  # pylint: disable=too-many-instance-attributes
 
     def _apply_settings_to_panels(self) -> None:
         general = self._settings.general
-        self._game.set_sd_card(general.sd_card_path)
         self._game.set_default_manufacturer(general.manufacturer)
         self._presentation.set_steamgriddb(self._settings.steamgriddb)
         self._tools = find_toolchain(self._settings.toolchain)
+        self._game.set_catalogs(self._systems, self._tools.available_cores())
         if self._tools.complete:
             self._toolchain_label.setText(self.tr("Toolchain ready"))
             self._toolchain_label.setToolTip(str(self._tools.makerom.parent))
@@ -255,7 +260,12 @@ class MainWindow(QMainWindow):  # pylint: disable=too-many-instance-attributes
         except CoreCatalogError as exc:
             self._cores = None
             _log.error("%s", exc)
-        self._game.set_cores(self._cores)
+        try:
+            self._systems = SystemCatalog.load(DEFAULT_SYSTEMS_JSON)
+        except SystemCatalogError as exc:
+            self._systems = None
+            _log.error("%s", exc)
+        self._game.set_catalogs(self._systems, self._tools.available_cores())
         self._reload_registry()
 
     def _reload_registry(self) -> None:
@@ -311,22 +321,34 @@ class MainWindow(QMainWindow):  # pylint: disable=too-many-instance-attributes
         """Whether ``manual_unique_id`` is the Title ID this document already has.
 
         Only then may the registry's entry for the document's previous
-        contents be superseded (see ``ForwarderRequest.replace_existing_id``).
+        contents be superseded (see ``GameRequest.replace_existing_id``).
         """
         return manual_unique_id is not None and manual_unique_id == self._document.unique_id
 
-    def _identity(self) -> ForwarderIdentity | None:
+    def _request(self, output: Path, **extra: object) -> GameRequest | None:
+        """The panels as a :class:`GameRequest`, or ``None`` while incomplete."""
         fields = self._game.fields()
-        if not (fields.core and fields.rom_path and fields.long_name):
+        if not (fields.rom and fields.console and fields.core and fields.long_name):
             return None
-        return make_request(
-            core=fields.core,
-            rom_path=fields.rom_path,
-            long_name=fields.long_name,
-            short_name=fields.short_name,
-            manufacturer=fields.manufacturer,
-            output=Path(),
-        ).identity()
+        try:
+            return make_request(
+                rom=Path(fields.rom),
+                console=fields.console,
+                core=fields.core,
+                folder=fields.folder,
+                long_name=fields.long_name,
+                short_name=fields.short_name,
+                manufacturer=fields.manufacturer,
+                output=output,
+                systems=self._systems,
+                **extra,
+            )
+        except BuildError:
+            return None
+
+    def _identity(self) -> GameIdentity | None:
+        request = self._request(Path())
+        return request.identity() if request else None
 
     def _unique_id_problem(self) -> tuple[int | None, str | None]:
         """``(unique_id, None)``, ``(None, error)`` or ``(None, None)`` if incomplete."""
@@ -383,7 +405,7 @@ class MainWindow(QMainWindow):  # pylint: disable=too-many-instance-attributes
     # ── New / Open ───────────────────────────────────────────────────────
 
     def _on_new(self) -> None:
-        if not self._confirm_discard(self.tr("start a new forwarder")):
+        if not self._confirm_discard(self.tr("start a new game")):
             return
         self._discard_loaded_files()
         self._game.reset()
@@ -392,7 +414,7 @@ class MainWindow(QMainWindow):  # pylint: disable=too-many-instance-attributes
         self._document.reset()
         self._refresh_title_id()
         self._update_title()
-        self._activity.set_status(self.tr("New forwarder"))
+        self._activity.set_status(self.tr("New game"))
 
     def _start_dir(self) -> Path:
         if self._document.path is not None:
@@ -405,7 +427,7 @@ class MainWindow(QMainWindow):  # pylint: disable=too-many-instance-attributes
             return
         # Read before asking about unsaved changes, so a bad file costs nothing.
         try:
-            loaded = read_forwarder_cia(path)
+            loaded = read_game_cia(path)
         except (CiaReadError, OSError) as exc:
             _log.error("%s: %s", path.name, exc)
             QMessageBox.critical(
@@ -417,14 +439,22 @@ class MainWindow(QMainWindow):  # pylint: disable=too-many-instance-attributes
         if self._confirm_discard(self.tr("open '{name}'").format(name=path.name)):
             self._apply_loaded(loaded, path)
 
-    def _apply_loaded(self, loaded: LoadedForwarder, path: Path) -> None:
+    def _apply_loaded(self, loaded: LoadedGame, path: Path) -> None:
         self._discard_loaded_files()
-        self._loaded_dir = Path(tempfile.mkdtemp(prefix="3ds-forwarder-loaded-"))
+        self._loaded_dir = Path(tempfile.mkdtemp(prefix="3ds-injector-loaded-"))
         assets = loaded.write_assets(self._loaded_dir)
+        try:
+            rom = loaded.extract_rom(self._loaded_dir / "rom")
+        except CiaReadError as exc:
+            _log.error("%s: %s", path.name, exc)
+            QMessageBox.critical(self, APP_TITLE, str(exc))
+            return
         self._game.set_fields(
             GameFields(
+                rom=str(rom),
+                console=loaded.console,
                 core=loaded.core,
-                rom_path=loaded.rom_path,
+                folder=loaded.folder,
                 short_name=loaded.short_name,
                 long_name=loaded.long_name,
                 manufacturer=loaded.manufacturer,
@@ -460,7 +490,7 @@ class MainWindow(QMainWindow):  # pylint: disable=too-many-instance-attributes
         return True
 
     def _ask_save_path(self) -> Path | None:
-        name = default_cia_filename(self._game.fields().rom_path)
+        name = default_cia_filename(self._game.fields().long_name)
         return choose_cia_to_save(self, self._start_dir(), name)
 
     def _on_save(self) -> None:
@@ -481,15 +511,10 @@ class MainWindow(QMainWindow):  # pylint: disable=too-many-instance-attributes
     def _start_build(self, output: Path) -> None:
         fields = self._game.fields()
         manual = self._title_id.manual_unique_id()
-        self._build_dir = Path(tempfile.mkdtemp(prefix="3ds-forwarder-ui-"))
+        self._build_dir = Path(tempfile.mkdtemp(prefix="3ds-injector-ui-"))
         icon, banner = self._presentation.write_build_images(self._build_dir)
-        request = make_request(
-            core=fields.core,
-            rom_path=fields.rom_path,
-            long_name=fields.long_name,
-            short_name=fields.short_name,
-            manufacturer=fields.manufacturer,
-            output=output,
+        request = self._request(
+            output,
             icon=icon,
             banner=banner,
             audio=self._presentation.jingle_path(),
@@ -497,6 +522,10 @@ class MainWindow(QMainWindow):  # pylint: disable=too-many-instance-attributes
             manual_unique_id=manual,
             replace_existing_id=self._replaces_document_id(manual),
         )
+        if request is None:  # _check_ready() makes this unreachable
+            shutil.rmtree(self._build_dir, ignore_errors=True)
+            self._build_dir = None
+            return
         _log.info("Building “%s” → %s", fields.long_name, output)
         self._set_busy(True)
         self._worker = BuildWorker(request, self._tools, self._settings.general.registry_path, self)

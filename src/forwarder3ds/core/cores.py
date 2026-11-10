@@ -2,8 +2,8 @@
 
 The catalog is ``forwarder3ds/data/cores.json``, produced by
 ``scripts/parse_retroarch_cores.py`` from RetroArch's ``pkg/ctr/Makefile.cores``.
-The same file generates ``stub/source/cores_table.h``, so the stub compiled
-into a package knows exactly the cores listed here.
+Game CIAs keep clear of the Unique IDs listed here, so installing one never
+replaces an official RetroArch core CIA.
 """
 
 from __future__ import annotations
@@ -85,8 +85,8 @@ class CoreRegistry:
     def all_unique_ids(self) -> set[int]:
         """Every 3DS Unique ID already taken by a core CIA.
 
-        Used as part of the reserved-ID set when generating forwarder Title
-        IDs, so a forwarder can never collide with an installed core.
+        Used as part of the reserved-ID set when generating game Title
+        IDs, so a game can never collide with an installed core.
         """
         return {entry.unique_id for entry in self._entries.values()}
 

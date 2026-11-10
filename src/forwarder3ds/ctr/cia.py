@@ -1,13 +1,13 @@
-"""Read an existing forwarder ``.cia`` back into the fields that built it.
+"""Read an existing game ``.cia`` back into the fields that built it.
 
-The inverse of :func:`forwarder3ds.builder.forwarder.build_forwarder`: walks the CIA
+The inverse of :func:`forwarder3ds.builder.injector.build_game`: walks the CIA
 container (header -> TMD -> NCCH -> ExeFS/RomFS) and recovers everything a
-rebuild needs -- Title ID, core, ROM path, SMDH names, icon, banner image
-and banner audio -- as a :class:`LoadedForwarder`.
+rebuild needs -- Title ID, core, console, save folder, the ROM itself, SMDH
+names, icon, banner image and banner audio -- as a :class:`LoadedGame`.
 
-Only what a forwarder built by this project contains is supported: a single
-unencrypted NCCH content (``EnableCrypt: false`` in ``data/forwarder.rsf``)
-with a flat RomFS holding ``core.txt`` and ``content.path``. Anything else
+Only what a CIA built by this project contains is supported: a single
+unencrypted NCCH content (``APP_ENCRYPTED=false`` for ``data/injected.rsf``)
+with a flat RomFS holding ``manifest.cfg`` and the ROM. Anything else
 raises :class:`CiaReadError` with a message meant to be shown to the user.
 Standard library only.
 
@@ -17,6 +17,7 @@ Layout references: https://www.3dbrew.org/wiki/CIA, /wiki/TMD, /wiki/NCCH,
 
 from __future__ import annotations
 
+import re
 import struct
 from dataclasses import dataclass
 from pathlib import Path
@@ -84,15 +85,17 @@ _LEVEL3_FILE_META_FIELDS = (7, 8, 9)  # meta table offset/size, file data offset
 _FILE_META_STRUCT = struct.Struct("<IIQQII")  # parent, sibling, offset, size, hash, name len
 _ROOT_DIR_OFFSET = 0
 
-CORE_FILE = "core.txt"
-CONTENT_PATH_FILE = "content.path"
+MANIFEST_FILE = "manifest.cfg"
+_MANIFEST_LINE = re.compile(r'^\s*([A-Za-z0-9_]+)\s*=\s*"([^"]*)"\s*$')
+_MANIFEST_KEYS = ("content", "core", "console", "game")
 _MAX_TEXT_FILE_SIZE = 4096
 _MAX_EXEFS_FILE_SIZE = 8 * 1024 * 1024
+_COPY_CHUNK = 1024 * 1024
 
 
 @dataclass(frozen=True)
 class LoadedAssets:
-    """Paths of the artwork/audio files written by :meth:`LoadedForwarder.write_assets`."""
+    """Paths of the artwork/audio files written by :meth:`LoadedGame.write_assets`."""
 
     icon: Path | None
     banner: Path | None
@@ -100,17 +103,30 @@ class LoadedAssets:
 
 
 @dataclass(frozen=True)
-class LoadedForwarder:
-    """Everything recovered from a forwarder CIA, ready to rebuild it.
+class _RomFsFile:
+    """Where a RomFS file's data sits in the CIA."""
+
+    offset: int
+    size: int
+
+
+@dataclass(frozen=True)
+class LoadedGame:  # pylint: disable=too-many-instance-attributes
+    """Everything recovered from a game CIA, ready to rebuild it.
 
     ``icon_png``/``banner_png``/``audio_wav`` are ``None`` when the CIA has
     no such asset or it could not be decoded (``warnings`` says why).
     ``audio_wav`` is also ``None`` for a silent jingle, i.e. "no custom audio".
+    The ROM stays in the CIA until :meth:`extract_rom` copies it out.
     """
 
     unique_id: int
     core: str
-    rom_path: str
+    console: str
+    folder: str
+    rom_name: str
+    source: Path
+    rom: _RomFsFile
     short_name: str
     long_name: str
     manufacturer: str
@@ -120,6 +136,29 @@ class LoadedForwarder:
     warnings: tuple[str, ...] = ()
 
     @property
+    def rom_size(self) -> int:
+        """Size of the ROM inside the CIA, in bytes."""
+        return self.rom.size
+
+    def extract_rom(self, directory: Path) -> Path:
+        """Copy the ROM out of the CIA into ``directory``, under its original name."""
+        directory.mkdir(parents=True, exist_ok=True)
+        target = directory / self.rom_name
+        try:
+            with self.source.open("rb") as src, target.open("wb") as dst:
+                src.seek(self.rom.offset)
+                remaining = self.rom.size
+                while remaining:
+                    chunk = src.read(min(_COPY_CHUNK, remaining))
+                    if not chunk:
+                        raise CiaReadError("Unexpected end of file while copying the ROM.")
+                    dst.write(chunk)
+                    remaining -= len(chunk)
+        except OSError as exc:
+            raise CiaReadError(f"Cannot extract the ROM: {exc.strerror or exc}") from exc
+        return target
+
+    @property
     def title_id(self) -> int:
         """The full 64-bit Title ID this CIA installs as."""
         return unique_id_to_title_id(self.unique_id)
@@ -127,7 +166,7 @@ class LoadedForwarder:
     def write_assets(self, directory: Path) -> LoadedAssets:
         """Write the recovered icon/banner/audio into ``directory``.
 
-        Yields the plain file paths ``ForwarderRequest`` expects. Assets
+        Yields the plain file paths ``GameRequest`` expects. Assets
         that were not recovered come back as ``None``.
         """
         directory.mkdir(parents=True, exist_ok=True)
@@ -203,7 +242,7 @@ def _locate_main_content(handle: BinaryIO) -> tuple[int, int]:
     if content_type & _CONTENT_TYPE_ENCRYPTED:
         raise CiaReadError(
             "This CIA's content is encrypted, so it was not built by this tool "
-            "(its forwarders are stored unencrypted)."
+            "(its CIAs are stored unencrypted)."
         )
     return content_offset, title_id
 
@@ -221,7 +260,7 @@ def _parse_ncch(handle: BinaryIO, ncch_offset: int) -> _Ncch:
         "<6I", header, _NCCH_REGIONS_OFFSET
     )
     if not romfs_offset or not romfs_size:
-        raise CiaReadError("The CIA has no RomFS, so it is not a forwarder.")
+        raise CiaReadError("The CIA has no RomFS, so it was not built by this tool.")
     return _Ncch(
         exefs_offset=ncch_offset + exefs_offset * unit,
         exefs_size=exefs_size * unit,
@@ -249,8 +288,8 @@ def _read_exefs_file(handle: BinaryIO, ncch: _Ncch, wanted: str) -> bytes | None
     return None
 
 
-def _read_romfs_files(handle: BinaryIO, ncch: _Ncch, wanted: set[str]) -> dict[str, bytes]:
-    """Read the named files that sit directly in the RomFS root directory."""
+def _romfs_root_files(handle: BinaryIO, ncch: _Ncch) -> dict[str, _RomFsFile]:
+    """Locate the files that sit directly in the RomFS root directory."""
     romfs = ncch.romfs_offset
     ivfc = _read_exact(handle, romfs, _IVFC_HEADER_SIZE, "the RomFS header")
     if ivfc[:4] != _IVFC_MAGIC:
@@ -268,7 +307,7 @@ def _read_romfs_files(handle: BinaryIO, ncch: _Ncch, wanted: set[str]) -> dict[s
     meta_offset, meta_size, data_offset = (header[field] for field in _LEVEL3_FILE_META_FIELDS)
     meta = _read_exact(handle, level3 + meta_offset, meta_size, "the RomFS file table")
 
-    found: dict[str, bytes] = {}
+    found: dict[str, _RomFsFile] = {}
     position = 0
     while position + _FILE_META_STRUCT.size <= len(meta):
         parent, _sibling, offset, size, _hash, name_length = _FILE_META_STRUCT.unpack_from(
@@ -277,12 +316,35 @@ def _read_romfs_files(handle: BinaryIO, ncch: _Ncch, wanted: set[str]) -> dict[s
         name_start = position + _FILE_META_STRUCT.size
         name = meta[name_start : name_start + name_length].decode("utf-16-le", errors="replace")
         position = name_start + _align(name_length, 4)
-        if parent != _ROOT_DIR_OFFSET or name not in wanted:
-            continue
-        if size > _MAX_TEXT_FILE_SIZE:
-            raise CiaReadError(f"RomFS file '{name}' has an implausible size ({size} bytes).")
-        found[name] = _read_exact(handle, level3 + data_offset + offset, size, f"RomFS '{name}'")
+        if parent == _ROOT_DIR_OFFSET:
+            found[name] = _RomFsFile(offset=level3 + data_offset + offset, size=size)
     return found
+
+
+def _read_manifest(handle: BinaryIO, files: dict[str, _RomFsFile]) -> dict[str, str]:
+    """Parse ``manifest.cfg``; raise :class:`CiaReadError` if it is missing or incomplete."""
+    entry = files.get(MANIFEST_FILE)
+    if entry is None:
+        raise CiaReadError(
+            f"The CIA has no '{MANIFEST_FILE}' in its RomFS, so it was not built by this tool."
+        )
+    if entry.size > _MAX_TEXT_FILE_SIZE:
+        raise CiaReadError(f"'{MANIFEST_FILE}' has an implausible size ({entry.size} bytes).")
+    try:
+        text = _read_exact(handle, entry.offset, entry.size, MANIFEST_FILE).decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise CiaReadError(f"'{MANIFEST_FILE}' in the CIA's RomFS is not valid UTF-8.") from exc
+    manifest: dict[str, str] = {}
+    for line in text.splitlines():
+        match = _MANIFEST_LINE.match(line)
+        if match:
+            manifest[match.group(1)] = match.group(2)
+    missing = [key for key in _MANIFEST_KEYS if not manifest.get(key)]
+    if missing:
+        raise CiaReadError(f"'{MANIFEST_FILE}' lacks: {', '.join(missing)}.")
+    if manifest["content"] not in files:
+        raise CiaReadError(f"The ROM '{manifest['content']}' is missing from the RomFS.")
+    return manifest
 
 
 def _decode_assets(
@@ -319,25 +381,11 @@ def _decode_assets(
     return short_name, long_name, manufacturer, icon_png, banner_png, audio_wav, warnings
 
 
-def _read_text(files: dict[str, bytes], name: str) -> str:
-    try:
-        text = files[name].decode("utf-8").strip()
-    except KeyError as exc:
-        raise CiaReadError(
-            f"The CIA has no '{name}' in its RomFS, so it is not a forwarder built by this tool."
-        ) from exc
-    except UnicodeDecodeError as exc:
-        raise CiaReadError(f"'{name}' in the CIA's RomFS is not valid UTF-8.") from exc
-    if not text:
-        raise CiaReadError(f"'{name}' in the CIA's RomFS is empty.")
-    return text
-
-
-def read_forwarder_cia(path: Path) -> LoadedForwarder:
-    """Load a forwarder ``.cia`` from ``path``.
+def read_game_cia(path: Path) -> LoadedGame:
+    """Load a game ``.cia`` from ``path``.
 
     Raises :class:`CiaReadError` if it is unreadable, is not a CIA, or is
-    not a (readable) forwarder built by this project.
+    not a (readable) game CIA built by this project.
     """
     try:
         with path.open("rb") as handle:
@@ -348,21 +396,24 @@ def read_forwarder_cia(path: Path) -> LoadedForwarder:
                 raise CiaReadError("The CIA is not an application title.") from exc
 
             ncch = _parse_ncch(handle, ncch_offset)
-            files = _read_romfs_files(handle, ncch, {CORE_FILE, CONTENT_PATH_FILE})
+            files = _romfs_root_files(handle, ncch)
+            manifest = _read_manifest(handle, files)
             icon_blob = _read_exefs_file(handle, ncch, ICON_FILE)
             banner_blob = _read_exefs_file(handle, ncch, BANNER_FILE)
     except OSError as exc:
         raise CiaReadError(f"Cannot read '{path}': {exc.strerror or exc}") from exc
 
-    core = _read_text(files, CORE_FILE)
-    rom_path = _read_text(files, CONTENT_PATH_FILE)
     short_name, long_name, manufacturer, icon_png, banner_png, audio_wav, warnings = _decode_assets(
         icon_blob, banner_blob
     )
-    return LoadedForwarder(
+    return LoadedGame(
         unique_id=unique_id,
-        core=core,
-        rom_path=rom_path,
+        core=manifest["core"],
+        console=manifest["console"],
+        folder=manifest["game"],
+        rom_name=Path(manifest.get("rom_name") or manifest["content"]).name,
+        source=path,
+        rom=files[manifest["content"]],
         short_name=short_name,
         long_name=long_name,
         manufacturer=manufacturer,

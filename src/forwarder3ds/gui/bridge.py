@@ -2,7 +2,7 @@
 
 * :class:`TaskThread` runs one blocking call (a SteamGridDB request, a
   download) off the UI thread and reports its result or error.
-* :class:`BuildWorker` runs :func:`~forwarder3ds.builder.forwarder.build_forwarder`.
+* :class:`BuildWorker` runs :func:`~forwarder3ds.builder.injector.build_game`.
 * :class:`QtLogHandler` forwards the package's log records to the Activity
   panel, so the GUI shows exactly what the command line prints.
 
@@ -21,7 +21,7 @@ from typing import Any
 from PySide6.QtCore import QObject, QThread, Signal
 
 from forwarder3ds.builder.errors import BuildError
-from forwarder3ds.builder.forwarder import ForwarderRequest, build_forwarder
+from forwarder3ds.builder.injector import GameRequest, build_game
 from forwarder3ds.builder.toolchain import Toolchain
 
 
@@ -46,14 +46,14 @@ class TaskThread(QThread):
 
 
 class BuildWorker(QThread):
-    """Builds one forwarder; progress arrives through the log handler."""
+    """Builds one game CIA; progress arrives through the log handler."""
 
     succeeded = Signal(int, Path)  # unique_id, output path
     failed = Signal(str)
 
     def __init__(
         self,
-        request: ForwarderRequest,
+        request: GameRequest,
         tools: Toolchain,
         registry: Path,
         parent: QObject | None = None,
@@ -65,7 +65,7 @@ class BuildWorker(QThread):
 
     def run(self) -> None:  # pylint: disable=missing-function-docstring
         try:
-            result = build_forwarder(self._request, self._tools, self._registry)
+            result = build_game(self._request, self._tools, self._registry)
         except BuildError as exc:
             self.failed.emit(str(exc))
         except Exception as exc:  # pylint: disable=broad-exception-caught

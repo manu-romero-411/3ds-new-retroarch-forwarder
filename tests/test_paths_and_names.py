@@ -1,4 +1,4 @@
-"""Small pure helpers: ROM titles, SD paths, output names, settings, toolchain lookup."""
+"""Small pure helpers: ROM titles, save folders, output names, settings, toolchain lookup."""
 
 # pylint: disable=missing-function-docstring
 
@@ -10,15 +10,17 @@ from pathlib import Path
 
 import pytest
 
-from forwarder3ds.builder.forwarder import (
+from forwarder3ds.builder.errors import BuildError
+from forwarder3ds.builder.injector import (
     default_cia_filename,
     ensure_cia_extension,
-    normalize_sd_path,
+    make_request,
+    manifest_text,
+    seed_config_text,
 )
 from forwarder3ds.builder.toolchain import find_toolchain
 from forwarder3ds.core import paths
-from forwarder3ds.core.names import suggest_title
-from forwarder3ds.core.sd_card import find_3ds_sd_cards, sd_relative_path
+from forwarder3ds.core.names import save_folder_name, suggest_title
 from forwarder3ds.core.settings import Settings, load_settings, masked, save_settings
 
 
@@ -35,23 +37,35 @@ def test_suggest_title(rom: str, title: str) -> None:
     assert suggest_title(rom) == title
 
 
-def test_sd_paths() -> None:
-    assert normalize_sd_path("sdmc:/roms/a.sfc") == "roms/a.sfc"
-    assert normalize_sd_path(" /roms\\b.sfc ") == "roms/b.sfc"
-    assert default_cia_filename("roms/snes/Game (USA).sfc") == "Game (USA).cia"
-    assert default_cia_filename("") == "forwarder.cia"
+def test_output_names() -> None:
+    assert default_cia_filename("Zelda: Link's Awakening") == "Zelda Link's Awakening.cia"
+    assert default_cia_filename("") == "game.cia"
     assert ensure_cia_extension(Path("x.v2")) == Path("x.v2.cia")
     assert ensure_cia_extension(Path("x.CIA")) == Path("x.CIA")
 
 
-def test_sd_card_detection(tmp_path: Path) -> None:
-    card = tmp_path / "media" / "user" / "SD"
-    (card / "Nintendo 3DS").mkdir(parents=True)
-    (tmp_path / "media" / "user" / "USB").mkdir()
-    assert find_3ds_sd_cards((str(tmp_path / "media" / "*" / "*"),)) == [card]
-    assert sd_relative_path(card, card / "roms" / "a.sfc") == "roms/a.sfc"
-    with pytest.raises(ValueError):
-        sd_relative_path(card, tmp_path / "elsewhere.sfc")
+@pytest.mark.parametrize(
+    ("title", "folder"),
+    [("Super Mario World", "Super Mario World"), ('A/B: "C"?', "A B C"), (" . ", "game")],
+)
+def test_save_folder_name(title: str, folder: str) -> None:
+    assert save_folder_name(title) == folder
+
+
+def test_request_defaults_and_romfs_files(tmp_path: Path) -> None:
+    rom = tmp_path / "Tetris (World) (Rev 1).GB"
+    rom.write_bytes(b"\0")
+    request = make_request(rom=rom, long_name="Tetris", output=tmp_path / "t.cia")
+    assert (request.console, request.core, request.folder) == ("gb", "gambatte", "Tetris")
+    assert request.content_name == "game.gb"
+    assert request.data_dir == "sdmc:/saves/gb/Tetris"
+    manifest = manifest_text(request)
+    assert 'content = "game.gb"' in manifest
+    assert 'data_dir = "sdmc:/saves/gb/Tetris"' in manifest
+    assert 'rom_name = "Tetris (World) (Rev 1).GB"' in manifest
+    assert 'core_options_path = "sdmc:/saves/gb/Tetris/game.opt"' in seed_config_text(request)
+    with pytest.raises(BuildError):
+        make_request(rom=tmp_path / "disc.chd", long_name="Disc", output=tmp_path / "d.cia")
 
 
 def test_settings_round_trip() -> None:
@@ -76,14 +90,22 @@ def test_settings_import_from_old_ui() -> None:
 
 def test_toolchain_from_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     toolchain = tmp_path / "toolchain"
-    for relative in ("bin/makerom", "bin/bannertool", "stub/3ds-forwarder-stub.elf"):
+    for relative in ("bin/makerom", "bin/bannertool", "bases/gambatte/retroarch.elf"):
         (toolchain / relative).parent.mkdir(parents=True, exist_ok=True)
         (toolchain / relative).write_bytes(b"")
-    (toolchain / "VERSIONS").write_text("makerom=v1\nstub=abc\n", encoding="utf-8")
+    (toolchain / "bases/gambatte/base.env").write_text(
+        "CORE_NAME=gambatte\nAPP_SYSTEM_MODE=64MB\nAPP_SYSTEM_MODE_EXT=124MB\n", encoding="utf-8"
+    )
+    (toolchain / "VERSIONS").write_text("makerom=v1\nbase-gambatte=abc\n", encoding="utf-8")
     monkeypatch.setenv(paths.TOOLCHAIN_ENV, str(toolchain))
     monkeypatch.setenv("PATH", str(tmp_path / "empty"))
     tools = find_toolchain()
     assert tools.complete
     assert tools.makerom == toolchain / "bin" / "makerom"
-    assert tools.versions() == {"makerom": "v1", "stub": "abc"}
+    assert tools.versions() == {"makerom": "v1", "base-gambatte": "abc"}
     assert tools.rsf.is_file()
+    assert tools.available_cores() == ["gambatte"]
+    base = tools.base("gambatte")
+    assert (base.system_mode, base.system_mode_ext, base.bottom_menu) == ("64MB", "124MB", None)
+    with pytest.raises(BuildError):
+        tools.base("snes9x2005")

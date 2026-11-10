@@ -1,5 +1,5 @@
-"""Errors raised while building a forwarder."""
+"""Errors raised while building a game CIA."""
 
 
 class BuildError(RuntimeError):
-    """A forwarder could not be built; the message is meant for the user."""
+    """A game CIA could not be built; the message is meant for the user."""

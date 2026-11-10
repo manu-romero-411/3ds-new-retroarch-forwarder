@@ -41,13 +41,13 @@ remove_package() {
 check_files() {
     test -x "${PREFIX}/toolchain/bin/makerom"
     test -x "${PREFIX}/toolchain/bin/bannertool"
-    test -f "${PREFIX}/toolchain/stub/3ds-forwarder-stub.elf"
+    test -f "${PREFIX}/toolchain/bases/snes9x2005/retroarch.elf"
     test -f "/usr/share/applications/${APP_ID}.desktop"
     test -f "/usr/share/icons/hicolor/scalable/apps/${APP_ID}.svg"
     test -f "/usr/share/icons/hicolor/48x48/apps/${APP_ID}.png"
 }
 
-build_forwarder() {
+build_game() {
     local work
     work="$(mktemp -d)"
     export HOME="${work}"
@@ -56,10 +56,12 @@ build_forwarder() {
         grep -qx "3ds-forwarder ${EXPECTED_VERSION}" "${work}/version.txt"
     fi
     3ds-forwarder doctor --offline
-    3ds-forwarder build --core snes9x2005 --rom "roms/snes/Smoke Test (USA).sfc" \
-        --long-name "Smoke Test" --jingle smw_coin -o "${work}/smoke.cia"
+    head -c 524288 /dev/zero > "${work}/Smoke Test (USA).sfc"
+    3ds-forwarder build --rom "${work}/Smoke Test (USA).sfc" --jingle smw_coin \
+        -o "${work}/smoke.cia"
     3ds-forwarder inspect "${work}/smoke.cia" | tee "${work}/inspect.txt"
     grep -q 'snes9x2005' "${work}/inspect.txt"
+    grep -q 'sdmc:/saves/snes/Smoke Test' "${work}/inspect.txt"
     grep -q 'Jingle: *yes' "${work}/inspect.txt"
     3ds-forwarder build --from-cia "${work}/smoke.cia" --short-name "Smoke"
     3ds-forwarder inspect "${work}/smoke.cia" | grep -q 'Short name: *Smoke$'
@@ -81,7 +83,7 @@ main() {
     [[ $# -eq 1 ]] || { log "[ERR ]" "Usage: smoke-test.sh PACKAGE" && exit 1; }
     install_package "$1"
     check_files
-    build_forwarder
+    build_game
     open_window
     remove_package "$1"
     log "[ OK ]" "$(basename "$1") works"

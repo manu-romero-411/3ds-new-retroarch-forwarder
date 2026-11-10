@@ -28,22 +28,16 @@ _LEGACY_UI_SETTINGS = Path("3ds-new-forwarder-generator") / "ForwarderBuilderUI.
 
 @dataclass
 class GeneralSettings:
-    """Defaults for new forwarders and where files go."""
+    """Defaults for new games and where files go."""
 
     manufacturer: str = DEFAULT_MANUFACTURER
     output_dir: str = ""
-    sd_card: str = ""
     registry: str = ""
 
     @property
     def output_path(self) -> Path:
         """Folder offered when saving a new ``.cia`` (home directory if unset)."""
         return Path(self.output_dir).expanduser() if self.output_dir else Path.home()
-
-    @property
-    def sd_card_path(self) -> Path | None:
-        """Fixed SD card root, or ``None`` to auto-detect mounted cards."""
-        return Path(self.sd_card).expanduser() if self.sd_card else None
 
     @property
     def registry_path(self) -> Path:
@@ -71,7 +65,7 @@ class ToolchainSettings:
 
     makerom: str = ""
     bannertool: str = ""
-    stub: str = ""
+    bases: str = ""
     ffmpeg: str = ""
 
 

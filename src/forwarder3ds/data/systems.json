@@ -1,0 +1,16 @@
+{
+  "gb": {"name": "Game Boy", "core": "gambatte", "extensions": ["gb"]},
+  "gbc": {"name": "Game Boy Color", "core": "gambatte", "extensions": ["gbc"]},
+  "gba": {"name": "Game Boy Advance", "core": "gpsp", "extensions": ["gba"]},
+  "nes": {"name": "Nintendo Entertainment System", "core": "fceumm", "extensions": ["nes", "unf", "unif"]},
+  "fds": {"name": "Famicom Disk System", "core": "fceumm", "extensions": ["fds"]},
+  "snes": {"name": "Super Nintendo", "core": "snes9x2005", "extensions": ["sfc", "smc"]},
+  "mastersystem": {"name": "Master System", "core": "genesis_plus_gx", "extensions": ["sms"]},
+  "megadrive": {"name": "Mega Drive", "core": "genesis_plus_gx", "extensions": ["md", "gen", "smd"]},
+  "gamegear": {"name": "Game Gear", "core": "genesis_plus_gx", "extensions": ["gg"]},
+  "sg1000": {"name": "SG-1000", "core": "genesis_plus_gx", "extensions": ["sg"]},
+  "segacd": {"name": "Mega-CD", "core": "genesis_plus_gx", "extensions": ["chd"]},
+  "pcengine": {"name": "PC Engine", "core": "mednafen_pce_fast", "extensions": ["pce"]},
+  "pcenginecd": {"name": "PC Engine CD", "core": "mednafen_pce_fast", "extensions": ["chd"]},
+  "psx": {"name": "PlayStation", "core": "pcsx_rearmed", "extensions": ["chd", "pbp"]}
+}

@@ -57,7 +57,7 @@ class TitleIdBar(QWidget):
 
         self._auto_check = QCheckBox("Auto")
         self._auto_check.setChecked(True)
-        self._auto_check.setToolTip("Derive the Unique ID from the forwarder's fields.")
+        self._auto_check.setToolTip("Derive the Unique ID from the game's fields.")
         self._auto_check.toggled.connect(self._on_auto_toggled)
         layout.addWidget(self._auto_check)
 

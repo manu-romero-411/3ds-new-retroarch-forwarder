@@ -2,9 +2,9 @@
 
 Commands::
 
-    3ds-forwarder build [options]     build (or rebuild) one forwarder .cia
-    3ds-forwarder inspect FILE.cia    show what a forwarder .cia contains
-    3ds-forwarder cores [FILTER]      list the RetroArch cores that can be forwarded
+    3ds-forwarder build [options]     build (or rebuild) one game .cia
+    3ds-forwarder inspect FILE.cia    show what a game .cia contains
+    3ds-forwarder cores [FILTER]      list the consoles, their cores and the bases built
     3ds-forwarder media               list the banner jingles and platform logos
     3ds-forwarder doctor              check the toolchain and the SteamGridDB key
     3ds-forwarder config              show the settings file (secrets masked)
@@ -23,21 +23,22 @@ from forwarder3ds import __version__
 from forwarder3ds.artwork.compositor import compose_banner_to_file
 from forwarder3ds.artwork.steamgriddb import SGDBClient, SGDBError, fetch_best_artwork
 from forwarder3ds.builder.errors import BuildError
-from forwarder3ds.builder.forwarder import (
-    ForwarderRequest,
-    build_forwarder,
+from forwarder3ds.builder.injector import (
+    GameRequest,
+    build_game,
     default_cia_filename,
     ensure_cia_extension,
-    load_cores,
+    load_systems,
     make_request,
     preview_title_id,
 )
 from forwarder3ds.builder.toolchain import find_toolchain
 from forwarder3ds.core import catalog, paths
 from forwarder3ds.core.logs import get_logger, log_success, setup_console_logging
+from forwarder3ds.core.names import suggest_title
 from forwarder3ds.core.settings import Settings, load_settings, masked
 from forwarder3ds.core.title_id import unique_id_to_title_id
-from forwarder3ds.ctr.cia import CiaReadError, LoadedForwarder, read_forwarder_cia
+from forwarder3ds.ctr.cia import CiaReadError, LoadedGame, read_game_cia
 
 _log = get_logger("cli")
 
@@ -51,9 +52,9 @@ class _Images:
     banner: Path | None = None
 
 
-def _load_source_cia(path: Path) -> LoadedForwarder:
+def _load_source_cia(path: Path) -> LoadedGame:
     try:
-        loaded = read_forwarder_cia(path)
+        loaded = read_game_cia(path)
     except (CiaReadError, OSError) as exc:
         raise BuildError(f"{path}: {exc}") from exc
     _log.info("Loaded %s (Title ID 0x%016X)", path, loaded.title_id)
@@ -113,9 +114,18 @@ def _images(
     return images
 
 
-def _request_from_args(
-    args: argparse.Namespace, settings: Settings, scratch: Path
-) -> ForwarderRequest:
+def _rom_from_args(args: argparse.Namespace, loaded: LoadedGame | None, scratch: Path) -> Path:
+    """The ROM given with ``--rom``, or the one inside the loaded CIA."""
+    if args.rom is not None:
+        return args.rom
+    assert loaded is not None  # main() requires --rom without --from-cia
+    try:
+        return loaded.extract_rom(scratch / "rom")
+    except CiaReadError as exc:
+        raise BuildError(str(exc)) from exc
+
+
+def _request_from_args(args: argparse.Namespace, settings: Settings, scratch: Path) -> GameRequest:
     """Merge the flags over the loaded CIA (if any) and the settings."""
     loaded = _load_source_cia(args.from_cia) if args.from_cia else None
     assets = loaded.write_assets(scratch / "loaded") if loaded else None
@@ -123,11 +133,11 @@ def _request_from_args(
     def pick(flag: str | None, from_cia: str) -> str:
         return flag if flag is not None else (from_cia if loaded else "")
 
+    rom = _rom_from_args(args, loaded, scratch)
     long_name = pick(args.long_name, loaded.long_name if loaded else "")
+    long_name = long_name or suggest_title(rom.name)
     if not long_name:
-        raise BuildError("--long-name is required (the loaded CIA has no name).")
-    rom_path = pick(args.rom, loaded.rom_path if loaded else "")
-    core = pick(args.core, loaded.core if loaded else "")
+        raise BuildError("--long-name is required (no name could be derived).")
 
     jingle, platform_logo = None, None
     try:
@@ -146,14 +156,16 @@ def _request_from_args(
     elif args.from_cia is not None:
         output = args.from_cia
     else:
-        output = settings.general.output_path / default_cia_filename(rom_path)
+        output = settings.general.output_path / default_cia_filename(long_name)
 
     unique_id = args.unique_id
     if unique_id is None and loaded is not None:
         unique_id = loaded.unique_id
     return make_request(
-        core=core,
-        rom_path=rom_path,
+        rom=rom,
+        console=pick(args.console, loaded.console if loaded else ""),
+        core=pick(args.core, loaded.core if loaded else ""),
+        folder=pick(args.folder, loaded.folder if loaded else ""),
         long_name=long_name,
         short_name=pick(args.short_name, loaded.short_name if loaded else ""),
         manufacturer=pick(args.manufacturer, loaded.manufacturer if loaded else "")
@@ -178,11 +190,13 @@ def _cmd_build(args: argparse.Namespace, settings: Settings) -> int:
                 unique_id = preview_title_id(request, registry)
                 print(f"Title ID:  0x{unique_id_to_title_id(unique_id):016X}")
                 print(f"Unique ID: 0x{unique_id:05X}")
+                print(f"Core:      {request.core} ({request.console})")
+                print(f"Saves:     {request.data_dir}")
                 print(f"Output:    {request.output}")
                 return 0
             if args.from_cia and request.output == args.from_cia:
                 _log.info("The loaded CIA will be replaced: %s", request.output)
-            build_forwarder(request, find_toolchain(settings.toolchain), registry)
+            build_game(request, find_toolchain(settings.toolchain), registry)
         except BuildError as exc:
             _log.error("%s", exc)
             return 1
@@ -194,7 +208,7 @@ def _cmd_build(args: argparse.Namespace, settings: Settings) -> int:
 
 def _cmd_inspect(args: argparse.Namespace, _settings: Settings) -> int:
     try:
-        loaded = read_forwarder_cia(args.cia)
+        loaded = read_game_cia(args.cia)
     except (CiaReadError, OSError) as exc:
         _log.error("%s: %s", args.cia, exc)
         return 1
@@ -202,7 +216,9 @@ def _cmd_inspect(args: argparse.Namespace, _settings: Settings) -> int:
         ("Title ID", f"0x{loaded.title_id:016X}"),
         ("Unique ID", f"0x{loaded.unique_id:05X}"),
         ("Core", loaded.core),
-        ("ROM", f"sdmc:/{loaded.rom_path}"),
+        ("Console", loaded.console),
+        ("Saves", f"sdmc:/saves/{loaded.console}/{loaded.folder}"),
+        ("ROM", f"{loaded.rom_name} ({loaded.rom_size} bytes)"),
         ("Short name", loaded.short_name),
         ("Long name", loaded.long_name),
         ("Manufacturer", loaded.manufacturer),
@@ -216,23 +232,32 @@ def _cmd_inspect(args: argparse.Namespace, _settings: Settings) -> int:
         _log.warning("%s", warning)
     if args.extract:
         written = loaded.write_assets(args.extract)
-        for path in (written.icon, written.banner, written.audio):
+        try:
+            rom = loaded.extract_rom(args.extract)
+        except CiaReadError as exc:
+            _log.error("%s", exc)
+            return 1
+        for path in (written.icon, written.banner, written.audio, rom):
             if path:
                 log_success(_log, "Wrote %s", path)
     return 0
 
 
-def _cmd_cores(args: argparse.Namespace, _settings: Settings) -> int:
+def _cmd_cores(args: argparse.Namespace, settings: Settings) -> int:
     try:
-        cores = load_cores()
+        systems = load_systems()
     except BuildError as exc:
         _log.error("%s", exc)
         return 1
+    built = set(find_toolchain(settings.toolchain).available_cores())
     wanted = (args.filter or "").casefold()
-    for entry in sorted(cores, key=lambda e: e.libretro_name):
-        if wanted and wanted not in f"{entry.libretro_name} {entry.title}".casefold():
+    for system in sorted(systems, key=lambda s: s.console):
+        text = f"{system.console} {system.name} {system.core}".casefold()
+        if wanted and wanted not in text:
             continue
-        print(f"{entry.libretro_name:<28} 0x{entry.unique_id:05X}  {entry.title}")
+        status = "base ready" if system.core in built else "no base"
+        extensions = ", ".join(f".{ext}" for ext in system.extensions)
+        print(f"{system.console:<14} {system.core:<20} {status:<11} {system.name} ({extensions})")
     return 0
 
 
@@ -260,10 +285,11 @@ def _cmd_doctor(args: argparse.Namespace, settings: Settings) -> int:
         print(f"  {directory}")
     if not paths.toolchain_dirs():
         print("  (none found)")
-    for name in ("makerom", "bannertool", "stub", "ffmpeg"):
+    for name in ("makerom", "bannertool", "bases", "ffmpeg"):
         path = getattr(tools, name)
         optional = " (optional: only for non-WAV audio)" if name == "ffmpeg" else ""
         print(f"  {name:<11} {path if path else 'NOT FOUND' + optional}")
+    print(f"  {'cores':<11} {', '.join(tools.available_cores()) or '(no base built)'}")
     for key, value in tools.versions().items():
         print(f"  {key:<11} {value}")
     status = 0 if tools.complete else 1
@@ -313,17 +339,28 @@ def _hex(value: str) -> int:
 
 
 def _add_build_parser(sub: argparse._SubParsersAction) -> None:
-    build = sub.add_parser("build", help="build one forwarder .cia")
+    build = sub.add_parser("build", help="build one game .cia")
     build.add_argument(
         "--from-cia",
         type=Path,
-        help="rebuild an existing forwarder, keeping its Title ID; its fields become the "
-        "defaults and it is replaced unless --output is given",
+        help="rebuild an existing game CIA, keeping its Title ID; its fields (and ROM) become "
+        "the defaults and it is replaced unless --output is given",
     )
     game = build.add_argument_group("game")
-    game.add_argument("--core", help="libretro core name (see '3ds-forwarder cores')")
-    game.add_argument("--rom", help="ROM path on the SD card, e.g. roms/snes/game.sfc")
-    game.add_argument("--long-name", help="SMDH long name; also the SteamGridDB search term")
+    game.add_argument("--rom", type=Path, help="ROM file to pack (CD games: a single .chd)")
+    game.add_argument(
+        "--console",
+        help="Batocera console name, e.g. snes (default: from the ROM's extension)",
+    )
+    game.add_argument("--core", help="libretro core (default: the console's, see 'cores')")
+    game.add_argument(
+        "--folder",
+        help="save folder name: sdmc:/saves/<console>/<folder> (default: the long name)",
+    )
+    game.add_argument(
+        "--long-name",
+        help="SMDH long name; also the SteamGridDB search term (default: from the ROM name)",
+    )
     game.add_argument("--short-name", help="SMDH short name (default: the long name)")
     game.add_argument("--manufacturer", help="SMDH publisher (default: from the settings)")
     game.add_argument("--name", help=argparse.SUPPRESS)  # legacy: internal name in the hash
@@ -356,17 +393,19 @@ def _add_build_parser(sub: argparse._SubParsersAction) -> None:
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="3ds-forwarder",
-        description="Build 3DS forwarders that launch one game with its RetroArch core.",
+        description="Build standalone 3DS CIAs of one game, each with its own RetroArch core.",
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     parser.add_argument("-v", "--verbose", action="store_true", help="debug output")
     sub = parser.add_subparsers(dest="command", required=True)
     _add_build_parser(sub)
-    inspect = sub.add_parser("inspect", help="show what a forwarder .cia contains")
+    inspect = sub.add_parser("inspect", help="show what a game .cia contains")
     inspect.add_argument("cia", type=Path)
-    inspect.add_argument("--extract", type=Path, metavar="DIR", help="write icon/banner/jingle")
-    cores = sub.add_parser("cores", help="list the RetroArch cores")
-    cores.add_argument("filter", nargs="?", help="substring of the core name or title")
+    inspect.add_argument(
+        "--extract", type=Path, metavar="DIR", help="write icon/banner/jingle and the ROM"
+    )
+    cores = sub.add_parser("cores", help="list the consoles and their RetroArch cores")
+    cores.add_argument("filter", nargs="?", help="substring of the console or core name")
     sub.add_parser("media", help="list banner jingles and platform logos")
     doctor = sub.add_parser("doctor", help="check the toolchain and SteamGridDB")
     doctor.add_argument("--offline", action="store_true", help="do not contact SteamGridDB")
@@ -390,12 +429,9 @@ def main(argv: list[str] | None = None) -> int:
     """Entry point of the ``3ds-forwarder`` command."""
     args = _build_parser().parse_args(argv)
     setup_console_logging(args.verbose)
-    if args.command == "build" and not args.from_cia:
-        missing = [flag for flag in ("core", "rom", "long_name") if getattr(args, flag) is None]
-        if missing:
-            flags = ", ".join("--" + flag.replace("_", "-") for flag in missing)
-            _log.error("%s required unless --from-cia is given", flags)
-            return 2
+    if args.command == "build" and not args.from_cia and args.rom is None:
+        _log.error("--rom is required unless --from-cia is given")
+        return 2
     try:
         return _COMMANDS[args.command](args, load_settings())
     except KeyboardInterrupt:

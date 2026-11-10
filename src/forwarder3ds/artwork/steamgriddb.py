@@ -33,7 +33,7 @@ _USER_AGENT = f"3ds-forwarder/{__version__}"
 
 
 class AssetKind(StrEnum):
-    """The SteamGridDB asset types a forwarder uses (values are API path names)."""
+    """The SteamGridDB asset types a game CIA uses (values are API path names)."""
 
     ICON = "icons"
     HERO = "heroes"

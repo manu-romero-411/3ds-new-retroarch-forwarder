@@ -8,7 +8,8 @@
 #   2. compiles makerom and bannertool inside a container of *your* system and
 #      version (Debian, Ubuntu, Fedora and their derivatives), or statically
 #      in Alpine for anything else, for your architecture;
-#   3. compiles the forwarder stub with devkitARM (or downloads the release's);
+#   3. compiles the RetroArch bases (RetroArch + one core each) with devkitARM,
+#      or downloads the release's (compiling them takes a while);
 #   4. installs the program into a private Python virtual environment.
 #
 #   ./install.sh                     install for the current user (~/.local)
@@ -16,7 +17,7 @@
 #   ./install.sh --version v0.2.0    install a given release
 #   ./install.sh --ref main          install a branch or commit
 #   ./install.sh --static            portable static tools, whatever the system
-#   ./install.sh --download-stub     use the release's stub instead of compiling it
+#   ./install.sh --download-bases    use the release's RetroArch bases instead of compiling them
 #   ./install.sh --no-gui            command line only (skips PySide6)
 #   ./install.sh --uninstall         remove a previous install.sh installation
 #
@@ -29,7 +30,7 @@ readonly APP_ID="io.github.manu_romero_411.forwarder3ds"
 readonly MODULE="forwarder3ds"
 readonly COMMAND="3ds-forwarder"
 readonly REPO="manu-romero-411/3ds-new-retroarch-forwarder"
-readonly STUB_NAME="3ds-forwarder-stub.elf"
+readonly BASES_ARCHIVE="retroarch-bases.tar.gz"
 readonly MIN_PYTHON="3.11"
 readonly MARKER=".installed-by-install-sh"
 
@@ -37,7 +38,7 @@ SCOPE=""
 REF=""
 WITH_GUI=1
 STATIC=0
-DOWNLOAD_STUB=0
+DOWNLOAD_BASES=0
 ACTION="install"
 WORK_DIR=""
 SOURCE_DIR=""
@@ -81,7 +82,7 @@ parse_args() {
                 shift
                 ;;
             --static) STATIC=1 ;;
-            --download-stub) DOWNLOAD_STUB=1 ;;
+            --download-bases) DOWNLOAD_BASES=1 ;;
             --no-gui) WITH_GUI=0 ;;
             --uninstall) ACTION="uninstall" ;;
             -h | --help)
@@ -249,28 +250,30 @@ build_tools() {
             && ${chown_cmd}"
 }
 
-download_stub() {
+download_bases() {
     local toolchain="$1" tag="$2" url
-    url="https://github.com/${REPO}/releases/download/${tag}/${STUB_NAME}"
-    log_info "Downloading the stub of ${tag}"
-    mkdir -p "${toolchain}/stub"
-    curl -fsSL "${url}" -o "${toolchain}/stub/${STUB_NAME}" || return 1
-    echo "stub=${tag} (release download)" >> "${toolchain}/VERSIONS"
+    url="https://github.com/${REPO}/releases/download/${tag}/${BASES_ARCHIVE}"
+    log_info "Downloading the RetroArch bases of ${tag}"
+    curl -fsSL "${url}" | tar -xz -C "${toolchain}" || return 1
+    if [[ -f "${toolchain}/bases/VERSIONS" ]]; then
+        cat "${toolchain}/bases/VERSIONS" >> "${toolchain}/VERSIONS"
+        rm "${toolchain}/bases/VERSIONS"
+    fi
 }
 
-build_stub() {
+build_bases() {
     local toolchain="$1" tag
     tag="$(release_tag)"
-    if [[ "${DOWNLOAD_STUB}" -eq 0 ]]; then
-        log_info "Compiling the stub with devkitARM"
-        if CONTAINER_ENGINE="${ENGINE[*]}" "${SOURCE_DIR}/packaging/toolchain/build-stub.sh" \
-            "${toolchain}"; then
+    if [[ "${DOWNLOAD_BASES}" -eq 0 ]]; then
+        log_info "Compiling the RetroArch bases with devkitARM (this takes a while)"
+        if CONTAINER_ENGINE="${ENGINE[*]}" "${SOURCE_DIR}/packaging/toolchain/build-base.sh" \
+            "${toolchain}" all; then
             return 0
         fi
-        log_warn "Could not compile the stub here; falling back to the release download"
+        log_warn "Could not compile the bases here; falling back to the release download"
     fi
-    [[ -n "${tag}" ]] || die "No release to download the stub from; compile it instead"
-    download_stub "${toolchain}" "${tag}" || die "Cannot download the stub of ${tag}"
+    [[ -n "${tag}" ]] || die "No release to download the bases from; compile them instead"
+    download_bases "${toolchain}" "${tag}" || die "Cannot download the bases of ${tag}"
 }
 
 # ── Source ───────────────────────────────────────────────────────────────
@@ -369,7 +372,7 @@ do_install() {
     staged="${WORK_DIR}/toolchain"
     mkdir -p "${staged}"
     build_tools "${staged}"
-    build_stub "${staged}"
+    build_bases "${staged}"
 
     if [[ -f "${MANIFEST}" ]]; then
         log_info "Replacing the previous installation in ${PREFIX}"

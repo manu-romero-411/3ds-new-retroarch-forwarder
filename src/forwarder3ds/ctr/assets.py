@@ -1,6 +1,6 @@
 """Decoders for the icon, banner and jingle formats stored inside a 3DS CIA.
 
-This is the inverse of what ``bannertool`` writes (see ``builder/forwarder.py``
+This is the inverse of what ``bannertool`` writes (see ``builder/injector.py``
 and ``builder/media.py``): given the raw ``icon`` (SMDH) and ``banner`` (CBMD)
 files found in a CIA's ExeFS, recover the names, a PNG of the icon, a PNG of
 the banner and a WAV of the banner jingle.
@@ -74,7 +74,7 @@ _EXPAND_6_BITS = [(value << 2) | (value >> 4) for value in range(64)]
 
 @dataclass(frozen=True)
 class SmdhInfo:
-    """What the SMDH holds that a forwarder cares about."""
+    """What the SMDH holds that a game CIA cares about."""
 
     short_name: str
     long_name: str

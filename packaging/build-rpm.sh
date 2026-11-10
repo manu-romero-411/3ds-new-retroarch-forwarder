@@ -3,7 +3,7 @@
 #
 #   packaging/build-rpm.sh --toolchain DIR
 #
-# --toolchain   directory made by toolchain/build-tools.sh + build-stub.sh
+# --toolchain   directory made by toolchain/build-tools.sh + build-base.sh
 #
 # Output: dist/3ds-new-retroarch-forwarder-<version>-<release>.<dist>.<arch>.rpm
 # (<dist> is the build system's own, e.g. fc43). Environment:

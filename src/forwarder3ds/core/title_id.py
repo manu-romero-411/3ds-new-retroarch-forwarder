@@ -1,4 +1,4 @@
-"""Deterministic 3DS Title ID generation for forwarders.
+"""Deterministic 3DS Title ID generation for injected games.
 
 Background on the format
 -------------------------
@@ -9,32 +9,32 @@ A 3DS Title ID is a 64-bit value::
 ``High32`` is ``0x00040000`` for a normal application (this project never
 changes it). ``Variation`` is a single byte, ``0x00`` for the base title;
 this project also never changes it. That leaves ``UniqueID``, a 20-bit
-value (``0x00000``-``0xFFFFF``), as the only part a forwarder can pick.
+value (``0x00000``-``0xFFFFF``), as the only part a game CIA can pick.
 
 Reserved namespace
 ------------------
 The pre-built RetroArch core CIAs already occupy the ``0xBAC00``-``0xBACFF``
 block (see ``forwarder3ds/data/cores.json``); this project must never generate a
-forwarder ID inside that block. Nintendo does not publish the ranges it has
+game ID inside that block. Nintendo does not publish the ranges it has
 assigned to retail/eShop titles, so no unofficial generator can *guarantee*
 zero collision with a real title. This module manages the risk instead of
 ignoring it:
 
-* Forwarder IDs are drawn from ``FORWARDER_NAMESPACE`` (``0xF0000``-
+* Game IDs are drawn from ``GAME_NAMESPACE`` (``0xF0000``-
   ``0xFFFFF``), a block conventionally used by homebrew/scene tools for
   exactly this purpose, kept well away from the RetroArch core block above.
 * Every ID handed out is written to a persistent registry
   (``~/.local/share/3ds-forwarder/title_id_registry.json`` by default) together with the exact
   inputs that produced it, so a second run with the same inputs always
   reproduces the same ID (idempotent), and a genuine collision against
-  anything already known (a core CIA or an earlier forwarder) is detected
+  anything already known (a core CIA or an earlier game) is detected
   and resolved deterministically rather than silently overwritten.
 
 Determinism
 -----------
 The ID is derived from a SHA-256 hash of the game's own identifying
-fields -- name, short name, long name, manufacturer, emulator core and ROM
-path -- so the same forwarder always gets the same ID across machines and
+fields -- name, short name, long name, manufacturer, emulator core and save
+folder -- so the same game always gets the same ID across machines and
 runs, without needing a shared counter. On a genuine collision, a small
 deterministic "nonce" is folded into the hash input and the search
 continues; this only changes the outcome for the game that actually
@@ -47,14 +47,14 @@ A user may instead pick the Unique ID by hand (e.g. from the UI's live
 preview field). ``TitleIdRegistry.resolve_manual`` records that choice
 through the same registry -- so later automatic builds steer clear of it
 too -- but rejects it outright if it collides with a core CIA or a
-*different* forwarder, via ``TitleIdCollisionError``.
+*different* game, via ``TitleIdCollisionError``.
 
 Rebuilding an existing CIA
 --------------------------
-When an existing forwarder CIA is loaded, edited and rebuilt, it must keep
+When an existing game CIA is loaded, edited and rebuilt, it must keep
 its Title ID even though the edit changes the fields that identify it. The
 registry still remembers the *previous* identity as the owner of that ID,
-which a plain manual override would reject as "used by another forwarder".
+which a plain manual override would reject as "used by another game".
 Passing ``replace_existing=True`` declares that the caller is deliberately
 superseding that entry: the old identity no longer describes any CIA, so it
 is dropped when the new one is recorded. Core CIA IDs stay off limits.
@@ -72,11 +72,11 @@ from pathlib import Path
 HIGH32_APPLICATION = 0x00040000
 VARIATION_BASE = 0x00
 
-# Reserved block for this project's forwarders: 0xF0000-0xFFFFF (2**16 slots).
+# Reserved block for this project's game CIAs: 0xF0000-0xFFFFF (2**16 slots).
 # Kept clear of the RetroArch core CIAs (0xBAC00-0xBACFF) and outside the
 # lower ranges Nintendo is known to have used for retail/eShop titles.
-FORWARDER_NAMESPACE = 0xF0000
-FORWARDER_NAMESPACE_SIZE = 0x10000
+GAME_NAMESPACE = 0xF0000
+GAME_NAMESPACE_SIZE = 0x10000
 MAX_UNIQUE_ID = 0xFFFFF
 
 
@@ -85,8 +85,8 @@ class TitleIdCollisionError(ValueError):
 
 
 @dataclass(frozen=True)
-class ForwarderIdentity:
-    """The fields that make a forwarder unique, in generation order.
+class GameIdentity:
+    """The fields that make a game CIA unique, in generation order.
 
     ``name`` is the internal/display identifier (also used as the default
     output filename); ``short_name``/``long_name``/``manufacturer`` map
@@ -98,7 +98,7 @@ class ForwarderIdentity:
     long_name: str
     manufacturer: str
     core: str
-    rom_path: str
+    data_dir: str
 
     def canonical_key(self, nonce: int = 0) -> str:
         """A stable string uniquely identifying this exact combination."""
@@ -108,7 +108,7 @@ class ForwarderIdentity:
             self.long_name,
             self.manufacturer,
             self.core,
-            self.rom_path,
+            self.data_dir,
         ]
         key = "\x1f".join(parts)  # unit separator: safe even if fields contain '|'
         if nonce:
@@ -116,17 +116,17 @@ class ForwarderIdentity:
         return key
 
     def digest_offset(self, nonce: int = 0) -> int:
-        """A value in ``[0, FORWARDER_NAMESPACE_SIZE)`` derived from SHA-256."""
+        """A value in ``[0, GAME_NAMESPACE_SIZE)`` derived from SHA-256."""
         digest = hashlib.sha256(self.canonical_key(nonce).encode("utf-8")).digest()
-        return int.from_bytes(digest[:4], "big") % FORWARDER_NAMESPACE_SIZE
+        return int.from_bytes(digest[:4], "big") % GAME_NAMESPACE_SIZE
 
 
 @dataclass
 class TitleIdRegistry:
-    """Persistent map of forwarder identity -> assigned Unique ID.
+    """Persistent map of game identity -> assigned Unique ID.
 
     Two lookup paths are kept in sync: ``by_key`` (canonical identity
-    string -> unique_id) makes regenerating the same forwarder idempotent;
+    string -> unique_id) makes regenerating the same game idempotent;
     ``assigned_ids`` (the set of ids already handed out) is what new
     lookups are checked against to avoid collisions.
     """
@@ -168,7 +168,7 @@ class TitleIdRegistry:
         """Every Unique ID this registry has already handed out."""
         return set(self.by_key.values())
 
-    def preview(self, identity: ForwarderIdentity, reserved_ids: set[int]) -> int:
+    def preview(self, identity: GameIdentity, reserved_ids: set[int]) -> int:
         """Return the Unique ID ``identity`` would get, without assigning it.
 
         Read-only counterpart to :meth:`resolve`: same lookup and
@@ -183,12 +183,12 @@ class TitleIdRegistry:
         taken = reserved_ids | self.assigned_ids()
         nonce = 0
         while True:
-            candidate = FORWARDER_NAMESPACE | identity.digest_offset(nonce)
+            candidate = GAME_NAMESPACE | identity.digest_offset(nonce)
             if candidate not in taken:
                 return candidate
             nonce += 1
 
-    def resolve(self, identity: ForwarderIdentity, reserved_ids: set[int]) -> int:
+    def resolve(self, identity: GameIdentity, reserved_ids: set[int]) -> int:
         """Return the Unique ID for ``identity``, assigning one if new.
 
         ``reserved_ids`` is the full set of IDs that must not be reused
@@ -206,7 +206,7 @@ class TitleIdRegistry:
 
     def validate_manual(
         self,
-        identity: ForwarderIdentity,
+        identity: GameIdentity,
         unique_id: int,
         reserved_ids: set[int],
         replace_existing: bool = False,
@@ -217,7 +217,7 @@ class TitleIdRegistry:
         checks but never records anything. Meant for live UI validation of
         a manually-typed ID, which may be incomplete or mid-edit.
 
-        With ``replace_existing`` an ID owned by a *different* forwarder in
+        With ``replace_existing`` an ID owned by a *different* game in
         this registry is accepted (see the module docstring); one reserved
         for a core CIA is still rejected.
         """
@@ -230,7 +230,7 @@ class TitleIdRegistry:
         owner_key = next((key for key, value in self.by_key.items() if value == unique_id), None)
         if owner_key is not None and owner_key != exact_key and not replace_existing:
             raise TitleIdCollisionError(
-                f"Unique ID 0x{unique_id:05X} is already used by another forwarder "
+                f"Unique ID 0x{unique_id:05X} is already used by another game "
                 "in the registry. Pick a different one."
             )
         if owner_key is None and unique_id in reserved_ids:
@@ -241,7 +241,7 @@ class TitleIdRegistry:
 
     def resolve_manual(
         self,
-        identity: ForwarderIdentity,
+        identity: GameIdentity,
         unique_id: int,
         reserved_ids: set[int],
         replace_existing: bool = False,
@@ -253,12 +253,12 @@ class TitleIdRegistry:
         Still goes through the same registry, so later automatic builds
         steer clear of it -- but raises ``TitleIdCollisionError`` (see
         :meth:`validate_manual`) if it is already used by a RetroArch core
-        CIA or a *different* forwarder identity. Re-submitting the same
+        CIA or a *different* game identity. Re-submitting the same
         identity with the same ID is a no-op (idempotent), same as
         :meth:`resolve`.
 
         ``replace_existing`` lets ``identity`` take over an ID currently
-        owned by another forwarder in this registry; that owner's entry is
+        owned by another game in this registry; that owner's entry is
         removed, since the CIA it described is being replaced.
         """
         self.validate_manual(identity, unique_id, reserved_ids, replace_existing)
@@ -285,7 +285,7 @@ class TitleIdRegistry:
         self,
         key: str,
         unique_id: int,
-        identity: ForwarderIdentity,
+        identity: GameIdentity,
         nonce: int | None,
         manual: bool,
     ) -> None:
@@ -298,7 +298,7 @@ class TitleIdRegistry:
                 "unique_id": unique_id,
                 "name": identity.name,
                 "core": identity.core,
-                "rom_path": identity.rom_path,
+                "data_dir": identity.data_dir,
                 "resolved_with_nonce": nonce,
                 "manual": manual,
             }
@@ -324,7 +324,7 @@ def title_id_to_unique_id(title_id: int) -> int:
 
 
 def preview_unique_id(
-    identity: ForwarderIdentity,
+    identity: GameIdentity,
     reserved_ids: set[int],
     registry: TitleIdRegistry,
     manual_unique_id: int | None = None,
@@ -344,7 +344,7 @@ def preview_unique_id(
 
 
 def generate_title_id(
-    identity: ForwarderIdentity,
+    identity: GameIdentity,
     reserved_ids: set[int],
     registry: TitleIdRegistry,
     manual_unique_id: int | None = None,

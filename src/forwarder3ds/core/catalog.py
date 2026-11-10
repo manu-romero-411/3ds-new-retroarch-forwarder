@@ -1,6 +1,6 @@
 """Catalog of ready-made banner jingles and platform frames, plus their rules.
 
-Two kinds of drop-in assets give a forwarder personality:
+Two kinds of drop-in assets give a game CIA personality:
 
 * jingles -- the tune that plays when the icon is selected on the HOME menu
   (banner audio);
