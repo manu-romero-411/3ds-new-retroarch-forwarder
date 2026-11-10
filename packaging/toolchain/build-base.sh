@@ -22,6 +22,8 @@ readonly HERE REPO_ROOT
 source "${HERE}/versions.env"
 readonly RECIPES_DIR="${REPO_ROOT}/injector/cores"
 readonly PATCHES_DIR="${REPO_ROOT}/injector/patches/retroarch"
+# Current devkitPro ships libctru 2.x, with picasso and bin2s in tools/bin.
+readonly -a RA_MAKE_FLAGS=(-f Makefile.ctr USE_CTRULIB_2=1)
 
 log() {
     local tag="$1"
@@ -81,7 +83,7 @@ patches_digest() {
 ra_make_var() {
     local ra_dir="$1" core="$2" var="$3"
     # shellcheck disable=SC2016 # $($*) is make syntax, not shell
-    make -s --no-print-directory -C "${ra_dir}" -f Makefile.ctr LIBRETRO="${core}" \
+    make -s --no-print-directory -C "${ra_dir}" "${RA_MAKE_FLAGS[@]}" LIBRETRO="${core}" \
         --eval 'print-%: ; @echo $($*)' "print-${var}"
 }
 
@@ -101,7 +103,7 @@ build_core() {
 
     log "[INFO]" "Linking RetroArch ${RETROARCH_REF} with ${CORE_NAME}"
     rm -f "${ra_dir}/retroarch_3ds.elf"
-    make -C "${ra_dir}" -f Makefile.ctr LIBRETRO="${CORE_NAME}" -j"${jobs}" \
+    make -C "${ra_dir}" "${RA_MAKE_FLAGS[@]}" LIBRETRO="${CORE_NAME}" -j"${jobs}" \
         retroarch_3ds.elf > /dev/null
 
     install -D -m 0644 "${ra_dir}/retroarch_3ds.elf" "${dest}/retroarch.elf"
