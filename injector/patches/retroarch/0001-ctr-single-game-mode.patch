@@ -1,0 +1,175 @@
+ctr: single-game ("injected") mode
+
+When the CIA has a RomFS with romfs:/game/manifest.cfg, load the content
+from the RomFS and keep config, saves, states, remaps and logs in the
+manifest's data_dir instead of sdmc:/retroarch. Stock behaviour is
+unchanged for CIAs without that file.
+
+Applies to RetroArch v1.22.2 (RETROARCH_REF in versions.env).
+
+diff --git a/frontend/drivers/platform_ctr.c b/frontend/drivers/platform_ctr.c
+index ef1459e8..c61acc67 100644
+--- a/frontend/drivers/platform_ctr.c
++++ b/frontend/drivers/platform_ctr.c
+@@ -16,6 +16,7 @@
+ 
+ #include <stdint.h>
+ #include <stddef.h>
++#include <stdlib.h>
+ #include <string.h>
+ #include <ctype.h>
+ #include <boolean.h>
+@@ -30,6 +31,8 @@
+ #include <3ds/services/mcuhwc.h>
+ 
+ #include <file/file_path.h>
++#include <file/config_file.h>
++#include <streams/file_stream.h>
+ #include <string/stdstring.h>
+ 
+ #ifdef HAVE_CONFIG_H
+@@ -95,6 +98,118 @@ static void get_first_valid_core(char* path_return, size_t len)
+ }
+ #endif
+ 
++#ifndef IS_SALAMANDER
++/*
++ * Single-game ("injected") mode.
++ *
++ * When the CIA carries a RomFS with romfs:/game/manifest.cfg, RetroArch
++ * runs as a standalone app for one game: the content is loaded from the
++ * RomFS and every writable path (config, saves, states, remaps, logs) lives
++ * in the manifest's data_dir, so it never touches sdmc:/retroarch.
++ *
++ * manifest.cfg keys:
++ *   content    = "rom.gb"                          file inside romfs:/game/
++ *   data_dir   = "sdmc:/3ds/injected/<name>"       per-game writable root
++ *   system_dir = "sdmc:/retroarch/cores/system"    optional BIOS folder
++ *
++ * romfs:/game/retroarch.cfg, if present, seeds data_dir/retroarch.cfg the
++ * first time the game boots; later edits made in the menu are kept.
++ */
++#define CTR_INJECTED_DIR      "romfs:/game"
++#define CTR_INJECTED_MANIFEST CTR_INJECTED_DIR "/manifest.cfg"
++#define CTR_INJECTED_BASE_CFG CTR_INJECTED_DIR "/retroarch.cfg"
++
++static bool ctr_romfs_mounted = false;
++static char ctr_injected_content[PATH_MAX_LENGTH];
++
++static void ctr_injected_set_dir(enum default_dirs type,
++      const char *root, const char *leaf)
++{
++   fill_pathname_join(g_defaults.dirs[type], root, leaf,
++         sizeof(g_defaults.dirs[type]));
++   path_mkdir(g_defaults.dirs[type]);
++}
++
++static void ctr_injected_seed_config(void)
++{
++   void *buf   = NULL;
++   int64_t len = 0;
++
++   if (path_is_valid(g_defaults.path_config)
++         || !path_is_valid(CTR_INJECTED_BASE_CFG))
++      return;
++
++   if (filestream_read_file(CTR_INJECTED_BASE_CFG, &buf, &len) && buf)
++   {
++      filestream_write_file(g_defaults.path_config, buf, len);
++      free(buf);
++   }
++}
++
++/* Returns true if this CIA is a single-game build and sets it up. */
++static bool ctr_injected_setup(struct rarch_main_wrap *params)
++{
++   char content[PATH_MAX_LENGTH];
++   char data_dir[PATH_MAX_LENGTH];
++   char system_dir[PATH_MAX_LENGTH];
++   config_file_t *manifest = NULL;
++
++   if (R_FAILED(romfsInit()))
++      return false;
++   ctr_romfs_mounted = true;
++
++   manifest = config_file_new(CTR_INJECTED_MANIFEST);
++   if (!manifest)
++      return false;
++
++   content[0]    = '\0';
++   data_dir[0]   = '\0';
++   system_dir[0] = '\0';
++   config_get_array(manifest, "content",    content,    sizeof(content));
++   config_get_array(manifest, "data_dir",   data_dir,   sizeof(data_dir));
++   config_get_array(manifest, "system_dir", system_dir, sizeof(system_dir));
++   config_file_free(manifest);
++
++   if (string_is_empty(content) || string_is_empty(data_dir))
++      return false;
++
++   path_mkdir(data_dir);
++   ctr_injected_set_dir(DEFAULT_DIR_SRAM,        data_dir, "saves");
++   ctr_injected_set_dir(DEFAULT_DIR_SAVESTATE,   data_dir, "states");
++   ctr_injected_set_dir(DEFAULT_DIR_MENU_CONFIG, data_dir, "config");
++   ctr_injected_set_dir(DEFAULT_DIR_REMAP,       data_dir, "config/remaps");
++   ctr_injected_set_dir(DEFAULT_DIR_PLAYLIST,    data_dir, "playlists");
++   ctr_injected_set_dir(DEFAULT_DIR_LOGS,        data_dir, "logs");
++   ctr_injected_set_dir(DEFAULT_DIR_CACHE,       data_dir, "temp");
++   ctr_injected_set_dir(DEFAULT_DIR_SCREENSHOT,  data_dir, "screenshots");
++   if (string_is_empty(system_dir))
++      ctr_injected_set_dir(DEFAULT_DIR_SYSTEM,   data_dir, "system");
++   else
++      strlcpy(g_defaults.dirs[DEFAULT_DIR_SYSTEM], system_dir,
++            sizeof(g_defaults.dirs[DEFAULT_DIR_SYSTEM]));
++
++   fill_pathname_join(g_defaults.path_config, data_dir,
++         FILE_PATH_MAIN_CONFIG, sizeof(g_defaults.path_config));
++   ctr_injected_seed_config();
++
++   fill_pathname_join(ctr_injected_content, CTR_INJECTED_DIR, content,
++         sizeof(ctr_injected_content));
++
++   if (params)
++   {
++      params->content_path  = ctr_injected_content;
++      params->sram_path     = NULL;
++      params->state_path    = NULL;
++      params->config_path   = NULL;
++      params->libretro_path = NULL;
++      params->flags        &= ~(RARCH_MAIN_WRAP_FLAG_VERBOSE
++                              | RARCH_MAIN_WRAP_FLAG_NO_CONTENT);
++      params->flags        |=   RARCH_MAIN_WRAP_FLAG_TOUCHED;
++   }
++   return true;
++}
++#endif
++
+ static void frontend_ctr_get_env(int* argc, char* argv[],
+       void* args, void* params_data)
+ {
+@@ -138,6 +253,12 @@ static void frontend_ctr_get_env(int* argc, char* argv[],
+                       "ctr", sizeof(g_defaults.dirs[DEFAULT_DIR_BOTTOM_ASSETS]));
+ 
+ #ifndef IS_SALAMANDER
++   if (!ctr_injected_setup((struct rarch_main_wrap*)params_data) && ctr_romfs_mounted)
++   {
++      /* A RomFS without a valid manifest: behave like stock RetroArch. */
++      romfsExit();
++      ctr_romfs_mounted = false;
++   }
+    dir_check_defaults("custom.ini");
+ #endif
+ }
+@@ -188,6 +309,12 @@ static void frontend_ctr_deinit(void* data)
+    gfxTopRightFramebuffers[0] = NULL;
+    gfxTopRightFramebuffers[1] = NULL;
+    gfxExit();
++
++   if (ctr_romfs_mounted)
++   {
++      romfsExit();
++      ctr_romfs_mounted = false;
++   }
+ #endif
+ }
+ 
