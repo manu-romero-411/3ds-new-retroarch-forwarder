@@ -10,8 +10,7 @@ linked with one core and patched for single-game mode, see
   settings), the menu's colour theme, the touch screen asset and, optionally, a top screen bezel
   (``bezel.png`` + its overlay ``bezel.cfg``), initial core options
   (``game.opt``) and a control remap (``game.rmp``);
-* an SMDH icon and a banner made by ``bannertool``: a 256x128 image, or a
-  3D model (``.cgfx``, e.g. made with pycgfx) used as it is;
+* an SMDH icon and a banner made by ``bannertool``;
 * a Title ID that is deterministic and collision-checked
   (:mod:`forwarder3ds.core.title_id`).
 
@@ -71,16 +70,6 @@ FALLBACK_CIA_STEM = "game"
 SMDH_FLAGS = "visible,recordusage"  # without "visible" the HOME menu hides the title
 #: SMDH flags of a title kept out of the Activity Log.
 SMDH_FLAGS_UNRECORDED = "visible"
-#: Banner files taken as a 3D model (CGFX, as pycgfx writes it) instead of an image.
-MODEL_BANNER_SUFFIX = ".cgfx"
-#: The HOME menu's limit for a decompressed banner model.
-MODEL_BANNER_MAX_SIZE = 0x80000
-
-
-def is_model_banner(path: Path | None) -> bool:
-    """Whether ``path`` is a 3D banner model rather than an image."""
-    return path is not None and path.suffix.lower() == MODEL_BANNER_SUFFIX
-
 
 #: Root of every game's data folder on the SD card.
 SAVES_ROOT = "sdmc:/saves"
@@ -355,21 +344,18 @@ def _make_smdh_and_banner(
     assert tools.bannertool is not None
     icon_icn = icon.with_name("icon.icn")
     banner_bnr = banner.with_name("banner.bnr")
-    flags = SMDH_FLAGS_UNRECORDED if request.hide_from_activity_log else SMDH_FLAGS
-    model = is_model_banner(banner)
-    if model:
-        flags += ",extendedbanner"  # what hardware-tested 3D banners set
     run_tool(
         [
             str(tools.bannertool), "makesmdh",
             "-s", request.short_name, "-l", request.long_name, "-p", request.manufacturer,
-            "-f", flags, "-i", str(icon), "-o", str(icon_icn),
+            "-f", SMDH_FLAGS_UNRECORDED if request.hide_from_activity_log else SMDH_FLAGS,
+            "-i", str(icon), "-o", str(icon_icn),
         ],
         "creating the icon",
     )  # fmt: skip
     run_tool(
-        [str(tools.bannertool), "makebanner", "-ci" if model else "-i", str(banner),
-         "-a", str(audio), "-o", str(banner_bnr)],
+        [str(tools.bannertool), "makebanner", "-i", str(banner), "-a", str(audio),
+         "-o", str(banner_bnr)],
         "creating the banner",
     )  # fmt: skip
     return icon_icn, banner_bnr
@@ -456,20 +442,9 @@ def build_game(
         audio_wav = scratch / "audio.wav"
         _log.info("Preparing icon, banner and jingle")
         prepare_icon(request.icon or placeholder_icon, icon_png)
-        if is_model_banner(request.banner):
-            assert request.banner is not None
-            size = request.banner.stat().st_size
-            if size > MODEL_BANNER_MAX_SIZE:
-                raise BuildError(
-                    f"The banner model {request.banner.name} is {size} bytes; "
-                    f"the HOME menu takes at most {MODEL_BANNER_MAX_SIZE}"
-                )
-            banner_png = scratch / "banner.cgfx"
-            shutil.copyfile(request.banner, banner_png)
-        else:
-            prepare_banner_image(
-                request.banner or placeholder_banner, banner_png, request.platform_logo
-            )
+        prepare_banner_image(
+            request.banner or placeholder_banner, banner_png, request.platform_logo
+        )
         prepare_banner_audio(request.audio, audio_wav, tools.ffmpeg)
 
         _log.info("Running bannertool")

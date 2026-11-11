@@ -476,6 +476,10 @@ class MainWindow(QMainWindow):  # pylint: disable=too-many-instance-attributes
                 QMessageBox.information(self, APP_TITLE, "\n".join(self._results))
             return
         project, output = self._queue.pop(0)
+        try:
+            self._context.refresh_card(project)
+        except OSError as exc:
+            _log.warning("Cannot draw the banner of “%s”: %s", project.title, exc)
         request = self._context.request(project, output)
         tools = self._context.tools
         if request is None or tools is None:

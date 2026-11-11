@@ -10,8 +10,9 @@ import copy
 from pathlib import Path
 
 from PySide6.QtCore import QObject, Qt, QUrl, Signal
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtGui import QColor, QDesktopServices, QPixmap
 from PySide6.QtWidgets import (
+    QColorDialog,
     QCheckBox,
     QDialog,
     QDialogButtonBox,
@@ -26,10 +27,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from forwarder3ds.artwork.banner_card import CardStyle, render_card_png
+from forwarder3ds.artwork.console_icons import custom_icons_dir
 from forwarder3ds.artwork.steamgriddb import API_KEY_HELP_URL, SGDBClient
 from forwarder3ds.builder.toolchain import find_toolchain
 from forwarder3ds.core import catalog, paths
 from forwarder3ds.core.settings import DEFAULT_MANUFACTURER, Settings, ToolchainSettings
+from forwarder3ds.ctr.formats import BANNER_HEIGHT, BANNER_WIDTH
 from forwarder3ds.gui.bridge import TaskThread
 from forwarder3ds.gui.widgets.path_picker import PathPicker
 
@@ -248,7 +252,7 @@ class MediaPage(_Page):
             (self.tr("Platform logos:"), paths.user_platform_logos_dir()),
         ):
             button = QPushButton(self.tr("Open"))
-            button.clicked.connect(lambda _=False, f=folder: self._open(f))
+            button.clicked.connect(lambda _=False, f=folder: self.open_folder(f))
             row = QHBoxLayout()
             path_label = QLabel(str(folder))
             path_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
@@ -257,9 +261,102 @@ class MediaPage(_Page):
             form.addRow(label, row)
 
     @staticmethod
-    def _open(folder: Path) -> None:
+    def open_folder(folder: Path) -> None:
+        """Create ``folder`` if needed and show it in the file manager."""
         folder.mkdir(parents=True, exist_ok=True)
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
+
+
+class _ColourButton(QPushButton):
+    """A button showing a colour; clicking it opens a colour picker."""
+
+    changed = Signal()
+
+    def __init__(self, title: str) -> None:
+        super().__init__()
+        self._title = title
+        self._colour = "#000000"
+        self.setFixedWidth(90)
+        self.clicked.connect(self._pick)
+
+    def colour(self) -> str:
+        """The colour as ``#rrggbb``."""
+        return self._colour
+
+    def set_colour(self, colour: str) -> None:
+        """Show ``colour`` (``#rrggbb``)."""
+        if QColor(colour).isValid():
+            self._colour = QColor(colour).name()
+        self.setText(self._colour)
+        text = "#000000" if QColor(self._colour).lightness() > 128 else "#ffffff"
+        self.setStyleSheet(f"background: {self._colour}; color: {text};")
+
+    def _pick(self) -> None:
+        chosen = QColorDialog.getColor(QColor(self._colour), self, self._title)
+        if chosen.isValid():
+            self.set_colour(chosen.name())
+            self.changed.emit()
+
+
+class BannerPage(_Page):
+    """Colours and font of the default banner (logo + console tag)."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.title = self.tr("Banner")
+        self._background = _ColourButton(self.tr("Banner background"))
+        self._text = _ColourButton(self.tr("Banner text"))
+        self._font = PathPicker(
+            select_dir=False,
+            placeholder=self.tr("Built-in"),
+            file_filter=self.tr("Fonts (*.ttf *.otf)"),
+        )
+        self._preview = QLabel()
+        self._preview.setFixedSize(BANNER_WIDTH * 2, BANNER_HEIGHT * 2)
+        self._background.changed.connect(self._refresh)
+        self._text.changed.connect(self._refresh)
+        self._font.edit.textChanged.connect(self._refresh)
+
+        icons = QPushButton(self.tr("Open"))
+        icons.clicked.connect(lambda: MediaPage.open_folder(custom_icons_dir()))
+        form = QFormLayout(self)
+        form.addRow(self.tr("Background:"), self._background)
+        form.addRow(self.tr("Text:"), self._text)
+        form.addRow(self.tr("Font:"), self._font)
+        form.addRow(self.tr("Console icons:"), icons)
+        form.addRow(
+            "",
+            _hint(
+                self.tr(
+                    "A PNG named after the console (gb.png, snes.png…) in that folder "
+                    "replaces its built-in icon."
+                )
+            ),
+        )
+        form.addRow(self._preview)
+
+    def _style(self) -> CardStyle:
+        return CardStyle(self._background.colour(), self._text.colour(), self._font.text())
+
+    def _refresh(self) -> None:
+        png = render_card_png(
+            console="snes", title="Super Mario World", year="1990", style=self._style()
+        )
+        pixmap = QPixmap()
+        pixmap.loadFromData(png)
+        self._preview.setPixmap(pixmap.scaled(self._preview.size()))
+
+    def load(self, settings: Settings) -> None:
+        self._background.set_colour(settings.banner.background)
+        self._text.set_colour(settings.banner.text)
+        self._font.set_text(settings.banner.font)
+        self._refresh()
+
+    def store(self, settings: Settings) -> None:
+        style = self._style()
+        settings.banner.background = style.background
+        settings.banner.text = style.text
+        settings.banner.font = style.font
 
 
 class SettingsDialog(QDialog):
@@ -272,7 +369,13 @@ class SettingsDialog(QDialog):
         self.setWindowTitle(self.tr("Settings"))
         self.resize(760, 460)
         self._settings = copy.deepcopy(settings)
-        self._pages: list[_Page] = [GeneralPage(), SteamGridDBPage(), ToolchainPage(), MediaPage()]
+        self._pages: list[_Page] = [
+            GeneralPage(),
+            SteamGridDBPage(),
+            ToolchainPage(),
+            MediaPage(),
+            BannerPage(),
+        ]
 
         self._list = QListWidget()
         self._list.setMaximumWidth(180)
@@ -313,4 +416,4 @@ class SettingsDialog(QDialog):
 
 
 #: Page indexes, for opening the dialog on a given page.
-PAGE_GENERAL, PAGE_STEAMGRIDDB, PAGE_TOOLCHAIN, PAGE_MEDIA = range(4)
+PAGE_GENERAL, PAGE_STEAMGRIDDB, PAGE_TOOLCHAIN, PAGE_MEDIA, PAGE_BANNER = range(5)

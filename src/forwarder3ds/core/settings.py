@@ -70,15 +70,26 @@ class ToolchainSettings:
 
 
 @dataclass
+class BannerSettings:
+    """Look of the default banner (logo + console tag), the same for every game."""
+
+    background: str = "#1e1e22"
+    text: str = "#ffffff"
+    #: A TTF/OTF file; empty for the built-in font.
+    font: str = ""
+
+
+@dataclass
 class Settings:
     """Everything the user can configure."""
 
     general: GeneralSettings = field(default_factory=GeneralSettings)
     steamgriddb: SteamGridDBSettings = field(default_factory=SteamGridDBSettings)
     toolchain: ToolchainSettings = field(default_factory=ToolchainSettings)
+    banner: BannerSettings = field(default_factory=BannerSettings)
 
 
-_SECTIONS = ("general", "steamgriddb", "toolchain")
+_SECTIONS = ("general", "steamgriddb", "toolchain", "banner")
 
 
 def _read_ini(parser: configparser.ConfigParser) -> Settings:

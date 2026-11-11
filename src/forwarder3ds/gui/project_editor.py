@@ -48,7 +48,6 @@ from PySide6.QtWidgets import (
 from forwarder3ds.artwork.compositor import compose_banner_png_bytes
 from forwarder3ds.artwork.libretro import ThumbnailKind, fetch_thumbnail
 from forwarder3ds.artwork.steamgriddb import AssetKind
-from forwarder3ds.builder.injector import is_model_banner
 from forwarder3ds.core.catalog import JINGLE_RULES, list_jingles, validate_jingle
 from forwarder3ds.core.game_config import ScreenMode
 from forwarder3ds.core.logs import get_logger
@@ -76,9 +75,6 @@ _SAVE_DELAY_MS = 400
 _ICON_PREVIEW = 96
 _BANNER_PREVIEW = (384, 192)
 IMAGE_FILE_FILTER = "Images (*.png *.jpg *.jpeg *.bmp *.webp);;All files (*)"
-BANNER_FILE_FILTER = (
-    "Images or 3D banner models (*.png *.jpg *.jpeg *.bmp *.webp *.cgfx);;All files (*)"
-)
 _THUMBNAILS = {
     BannerStyle.TITLE_SCREEN: ThumbnailKind.TITLE,
     BannerStyle.SNAPSHOT: ThumbnailKind.SNAP,
@@ -148,6 +144,15 @@ class ProjectEditor(QScrollArea):  # pylint: disable=too-many-instance-attribute
         self._banner.setFrameShape(QLabel.Shape.StyledPanel)
         self._banner.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._banner_source = _hint("")
+        self._card_box = QWidget()
+        self._card_name = QLineEdit()
+        self._card_show_name = QCheckBox(self.tr("Show"))
+        self._card_year = QLineEdit()
+        self._card_year.setMaximumWidth(80)
+        self._card_timer = QTimer(self)
+        self._card_timer.setSingleShot(True)
+        self._card_timer.setInterval(150)
+        self._card_timer.timeout.connect(self._render_card)
         self._jingle = AssetChoice(
             none_label=self.tr("Silence"),
             list_entries=list_jingles,
@@ -241,6 +246,7 @@ class ProjectEditor(QScrollArea):  # pylint: disable=too-many-instance-attribute
         group = QGroupBox(self.tr("CIA banner"))
         form = QFormLayout(group)
         styles = {
+            BannerStyle.CARD: self.tr("Logo + console and year"),
             BannerStyle.STEAMGRIDDB: self.tr("SteamGridDB: hero + logo"),
             BannerStyle.TITLE_SCREEN: self.tr("libretro: title screen"),
             BannerStyle.SNAPSHOT: self.tr("libretro: screenshot"),
@@ -252,11 +258,36 @@ class ProjectEditor(QScrollArea):  # pylint: disable=too-many-instance-attribute
         from_file.clicked.connect(self._banner_from_file)
         self._banner_download.clicked.connect(self._download_banner)
         form.addRow(self.tr("Style:"), self._banner_style)
+        form.addRow(self._build_card_box())
         form.addRow("", _row(self._banner_download, from_file, stretch_first=False))
         form.addRow("", self._banner)
         form.addRow("", self._banner_source)
         form.addRow(self.tr("Jingle:"), _row(self._jingle, self._play))
         return group
+
+    def _build_card_box(self) -> QWidget:
+        """Logo, name and year of the default banner (shown for that style only)."""
+        logo_sgdb = QPushButton(self.tr("Download from SteamGridDB…"))
+        logo_sgdb.clicked.connect(self._logo_from_sgdb)
+        logo_file = QPushButton(self.tr("From file…"))
+        logo_file.clicked.connect(self._logo_from_file)
+        logo_clear = QPushButton(self.tr("Clear"))
+        logo_clear.clicked.connect(lambda: self._set_logo(None))
+        form = QFormLayout(self._card_box)
+        form.setContentsMargins(0, 0, 0, 0)
+        form.addRow(self.tr("Logo:"), _row(logo_sgdb, logo_file, logo_clear, stretch_first=False))
+        form.addRow(self.tr("Name:"), _row(self._card_name, self._card_show_name))
+        form.addRow(self.tr("Year:"), self._card_year)
+        form.addRow(
+            "",
+            _hint(
+                self.tr(
+                    "Without a logo the title is written instead. "
+                    "Colours and font: Settings › Banner."
+                )
+            ),
+        )
+        return self._card_box
 
     def _connect(self) -> None:
         self._console_combo.currentIndexChanged.connect(self._on_console_changed)
@@ -268,6 +299,9 @@ class ProjectEditor(QScrollArea):  # pylint: disable=too-many-instance-attribute
         self._title_id.changed.connect(self._on_edited)
         self._hide_log.toggled.connect(self._on_edited)
         self._banner_style.currentIndexChanged.connect(self._on_banner_style)
+        self._card_name.textChanged.connect(self._on_card_edited)
+        self._card_show_name.toggled.connect(self._on_card_edited)
+        self._card_year.textChanged.connect(self._on_card_edited)
         self._jingle.changed.connect(self._on_jingle)
         self._player.playing_changed.connect(self._update_play_button)
         self._player.failed.connect(lambda message: _log.warning("%s", message))
@@ -302,6 +336,7 @@ class ProjectEditor(QScrollArea):  # pylint: disable=too-many-instance-attribute
         self._select(self._core_combo, self._project.core)
         self._core_combo.blockSignals(False)
         self._refresh_title_id()
+        self._card_timer.start()
 
     def save(self) -> None:
         """Write the project now."""
@@ -349,6 +384,10 @@ class ProjectEditor(QScrollArea):  # pylint: disable=too-many-instance-attribute
         else:
             self._title_id.set_manual_unique_id(project.unique_id)
         self._select(self._banner_style, project.banner_style)
+        self._card_name.setText(project.banner_name)
+        self._card_show_name.setChecked(project.banner_show_name)
+        self._card_year.setText(project.banner_year)
+        self._show_card_box()
         audio = project.asset(Asset.AUDIO)
         self._jingle.select_path(audio, self.tr("Project jingle") if audio else None)
         self._update_play_button(False)
@@ -372,6 +411,7 @@ class ProjectEditor(QScrollArea):  # pylint: disable=too-many-instance-attribute
         project.unique_id = self._title_id.manual_unique_id()
         self._show_data_dir()
         self._refresh_title_id()
+        self._card_timer.start()
         self._save_timer.start()
 
     def _on_long_name(self, text: str) -> None:
@@ -413,6 +453,8 @@ class ProjectEditor(QScrollArea):  # pylint: disable=too-many-instance-attribute
             current = self._publisher.text().strip()
             if game.publisher and current in ("", DEFAULT_MANUFACTURER):
                 self._publisher.setText(game.publisher)
+        self._show_card_box()
+        self._card_timer.start()
         if user or game is not None:
             self._save_timer.start()
 
@@ -464,8 +506,8 @@ class ProjectEditor(QScrollArea):  # pylint: disable=too-many-instance-attribute
             self._show_banner()
         self.save()
 
-    def _pick_file(self, title: str, file_filter: str = IMAGE_FILE_FILTER) -> Path | None:
-        path, _filter = QFileDialog.getOpenFileName(self, title, "", file_filter)
+    def _pick_file(self, title: str) -> Path | None:
+        path, _filter = QFileDialog.getOpenFileName(self, title, "", IMAGE_FILE_FILTER)
         return Path(path) if path else None
 
     def _icon_from_file(self) -> None:
@@ -501,12 +543,7 @@ class ProjectEditor(QScrollArea):  # pylint: disable=too-many-instance-attribute
             self._icon.setPixmap(pixmap)
 
     def _show_banner(self) -> None:
-        banner = self._project.asset(Asset.BANNER)
-        if is_model_banner(banner):
-            self._banner.clear()
-            self._banner.setText(self.tr("3D banner model (CGFX)"))
-            return
-        pixmap = self._pixmap(banner, *_BANNER_PREVIEW)
+        pixmap = self._pixmap(self._project.asset(Asset.BANNER), *_BANNER_PREVIEW)
         if pixmap is None:
             self._banner.clear()
             self._banner.setText(self.tr("Default banner"))
@@ -516,15 +553,70 @@ class ProjectEditor(QScrollArea):  # pylint: disable=too-many-instance-attribute
     def _on_banner_style(self) -> None:
         style = BannerStyle(self._banner_style.currentData())
         self._banner_download.setEnabled(style is not BannerStyle.FILE)
+        self._show_card_box()
         if self._loading:
             return
         self._project.banner_style = style
         self.save()
-        if style in _THUMBNAILS:
+        if style is BannerStyle.CARD:
+            self._render_card()
+        elif style in _THUMBNAILS:
             self._download_banner()
 
+    # ── Default banner (logo + tag) ──────────────────────────────────────
+
+    def _show_card_box(self) -> None:
+        card = self._banner_style.currentData() == BannerStyle.CARD
+        self._card_box.setVisible(card)
+        self._banner_download.setVisible(not card)
+        self._card_name.setPlaceholderText(self._project.title)
+        self._card_year.setPlaceholderText(self._project.year or self.tr("Year"))
+        self._card_name.setEnabled(self._card_show_name.isChecked())
+
+    def _on_card_edited(self) -> None:
+        self._card_name.setEnabled(self._card_show_name.isChecked())
+        if self._loading:
+            return
+        project = self._project
+        project.banner_name = self._card_name.text().strip()
+        project.banner_show_name = self._card_show_name.isChecked()
+        project.banner_year = self._card_year.text().strip()
+        self._card_timer.start()
+        self._save_timer.start()
+
+    def _render_card(self) -> None:
+        if self._loading or self._project.banner_style is not BannerStyle.CARD:
+            return
+        try:
+            self._context.refresh_card(self._project)
+        except OSError as exc:
+            _log.error("Cannot draw the banner: %s", exc)
+            return
+        self._banner_source.setText("")
+        self._show_banner()
+
+    def _set_logo(self, source: Path | bytes | None) -> None:
+        try:
+            self._context.store.set_asset(self._project, Asset.LOGO, source)
+        except OSError as exc:
+            _log.error("Cannot store the logo: %s", exc)
+            return
+        self._render_card()
+
+    def _logo_from_file(self) -> None:
+        path = self._pick_file(self.tr("Choose the logo"))
+        if path is not None:
+            self._set_logo(path)
+
+    def _logo_from_sgdb(self) -> None:
+        self._sgdb.pick(
+            AssetKind.LOGO,
+            self._project.long_name,
+            lambda data, _source: data and self._set_logo(data),
+        )
+
     def _banner_from_file(self) -> None:
-        path = self._pick_file(self.tr("Choose the banner image or model"), BANNER_FILE_FILTER)
+        path = self._pick_file(self.tr("Choose the banner image"))
         if path is None:
             return
         self._banner_source.setText(self.tr("File · {name}").format(name=path.name))

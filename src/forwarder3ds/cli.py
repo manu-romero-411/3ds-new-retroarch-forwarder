@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from forwarder3ds import __version__
+from forwarder3ds.artwork.banner_card import CardStyle, render_card_to_file
 from forwarder3ds.artwork.compositor import compose_banner_to_file
 from forwarder3ds.artwork.steamgriddb import SGDBClient, SGDBError, fetch_best_artwork
 from forwarder3ds.builder.errors import BuildError
@@ -102,14 +103,28 @@ def _read(path: Path | None) -> bytes | None:
         raise BuildError(f"Cannot read {path}: {exc}") from exc
 
 
-def _images(
+@dataclass(frozen=True)
+class _Card:
+    """What the default banner's tag says."""
+
+    console: str
+    title: str
+    year: str
+
+
+def _images(  # pylint: disable=too-many-arguments,too-many-positional-arguments
     args: argparse.Namespace,
     settings: Settings,
     query: str,
     loaded_assets: _Images,
     scratch: Path,
+    card: _Card,
 ) -> _Images:
-    """Icon and banner files, by priority: flags, SteamGridDB, the loaded CIA, placeholder."""
+    """Icon and banner files, by priority: flags, SteamGridDB, the loaded CIA, default.
+
+    The default banner is the logo (or the title) over a tag with the
+    console and the year; ``--hero`` makes the older hero + logo banner.
+    """
     sgdb_icon, sgdb_hero, sgdb_logo = _steamgriddb_images(args, settings, query)
     images = _Images(icon=args.icon, banner=args.banner)
     if images.icon is None and sgdb_icon is not None:
@@ -119,8 +134,19 @@ def _images(
 
     hero = _read(args.hero) or sgdb_hero
     logo = _read(args.logo) or sgdb_logo
-    if images.banner is None and (hero or logo):
+    if images.banner is None and hero:
         images.banner = compose_banner_to_file(hero, logo, scratch / "composed_banner.png")
+    elif images.banner is None and (logo or loaded_assets.banner is None):
+        banner = settings.banner
+        images.banner = render_card_to_file(
+            scratch / "card_banner.png",
+            console=card.console,
+            title=card.title,
+            name=args.banner_name or "",
+            year=card.year,
+            logo=logo,
+            style=CardStyle(banner.background, banner.text, banner.font),
+        )
     images.banner = images.banner or loaded_assets.banner
     return images
 
@@ -192,7 +218,13 @@ def _request_from_args(args: argparse.Namespace, settings: Settings, scratch: Pa
         raise BuildError(str(exc)) from exc
 
     loaded_images = _Images(assets.icon, assets.banner) if assets else _Images()
-    images = _images(args, settings, long_name, loaded_images, scratch)
+    system = _system_for(rom, pick(args.console, loaded.console if loaded else ""))
+    card = _Card(
+        console=system.console if system else "",
+        title=long_name,
+        year=args.year if args.year is not None else (db_game.year if db_game else ""),
+    )
+    images = _images(args, settings, long_name, loaded_images, scratch, card)
 
     if args.output is not None:
         output = ensure_cia_extension(args.output)
@@ -508,12 +540,12 @@ def _add_build_parser(sub: argparse._SubParsersAction) -> None:
     art.add_argument("--sgdb-key", help="SteamGridDB API key (default: from the settings)")
     art.add_argument("--icon", type=Path, help="icon image, any size (stretched to 48x48)")
     art.add_argument("--hero", type=Path, help="banner background (cover-cropped)")
-    art.add_argument("--logo", type=Path, help="game logo pasted over the hero")
     art.add_argument(
-        "--banner",
-        type=Path,
-        help="ready-made banner (replaces hero + logo): an image, or a .cgfx 3D model",
+        "--logo", type=Path, help="game logo, on the default banner (or over the hero)"
     )
+    art.add_argument("--year", help="year on the default banner (default: from --identify)")
+    art.add_argument("--banner-name", help="name on the default banner's tag (default: none)")
+    art.add_argument("--banner", type=Path, help="ready-made banner (replaces hero + logo)")
     art.add_argument("--platform-logo", help="frame drawn over the banner: catalog name or PNG")
     bezel = art.add_mutually_exclusive_group()
     bezel.add_argument(

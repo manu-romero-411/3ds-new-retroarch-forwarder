@@ -44,11 +44,15 @@ class Asset(str, Enum):
     BANNER = "banner"
     AUDIO = "audio"
     BEZEL = "bezel"
+    #: The game's logo, for the default banner.
+    LOGO = "logo"
 
 
 class BannerStyle(str, Enum):
     """Where the banner image comes from."""
 
+    #: The game's logo (or title) over a tag with the console and the year.
+    CARD = "card"
     #: SteamGridDB hero with the game's logo over it.
     STEAMGRIDDB = "steamgriddb"
     #: The title screen from libretro's thumbnails.
@@ -86,7 +90,12 @@ class Project:  # pylint: disable=too-many-instance-attributes
     #: under it replaces that CIA even after the names changed.
     built_id: int | None = None
     hide_from_activity_log: bool = False
-    banner_style: BannerStyle = BannerStyle.STEAMGRIDDB
+    banner_style: BannerStyle = BannerStyle.CARD
+    #: Name on the banner's tag (shown when ``banner_show_name``).
+    banner_name: str = ""
+    banner_show_name: bool = False
+    #: Year on the banner's tag; empty: the database's year.
+    banner_year: str = ""
     screen: ScreenSettings = field(default_factory=ScreenSettings)
     core_options: dict[str, str] = field(default_factory=dict)
     remap: dict[str, str] = field(default_factory=dict)
@@ -105,6 +114,16 @@ class Project:  # pylint: disable=too-many-instance-attributes
     def title(self) -> str:
         """What the library lists the project as."""
         return self.long_name or self.rom_path.stem
+
+    @property
+    def tag_year(self) -> str:
+        """The year on the banner's tag."""
+        return self.banner_year.strip() or self.year
+
+    @property
+    def tag_name(self) -> str:
+        """The name on the banner's tag (empty when hidden)."""
+        return (self.banner_name.strip() or self.title) if self.banner_show_name else ""
 
     def asset(self, kind: Asset) -> Path | None:
         """The project's copy of ``kind``, if it has one."""
@@ -131,6 +150,9 @@ class Project:  # pylint: disable=too-many-instance-attributes
             "built_id": self.built_id,
             "hide_from_activity_log": self.hide_from_activity_log,
             "banner_style": self.banner_style.value,
+            "banner_name": self.banner_name,
+            "banner_show_name": self.banner_show_name,
+            "banner_year": self.banner_year,
             "screen": self.screen.to_json(),
             "core_options": dict(self.core_options),
             "remap": dict(self.remap),
@@ -157,9 +179,9 @@ class Project:  # pylint: disable=too-many-instance-attributes
         unique_id = data.get("unique_id")
         built_id = data.get("built_id")
         try:
-            banner_style = BannerStyle(data.get("banner_style", BannerStyle.STEAMGRIDDB.value))
+            banner_style = BannerStyle(data.get("banner_style", BannerStyle.CARD.value))
         except ValueError:
-            banner_style = BannerStyle.STEAMGRIDDB
+            banner_style = BannerStyle.CARD
         modified = data.get("modified", 0.0)
         return cls(
             id=text("id"),
@@ -177,6 +199,9 @@ class Project:  # pylint: disable=too-many-instance-attributes
             built_id=built_id if isinstance(built_id, int) else None,
             hide_from_activity_log=bool(data.get("hide_from_activity_log", False)),
             banner_style=banner_style,
+            banner_name=text("banner_name"),
+            banner_show_name=bool(data.get("banner_show_name", False)),
+            banner_year=text("banner_year"),
             screen=ScreenSettings.from_json(data.get("screen")),
             core_options=strings("core_options"),
             remap=normalize_remap(strings("remap")),

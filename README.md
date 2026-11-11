@@ -97,8 +97,11 @@ projects and one **tab** per project being edited.
   (long and short names, publisher, icon from a file or SteamGridDB) and
   *Content options* (core, save folder, **Injection options…**). Right:
   *CIA header* (Title ID, *Auto* or typed, *Random*; hide from the
-  Activity Log) and *CIA banner* (style: SteamGridDB hero + logo, libretro
-  title screen or screenshot, or an image file; preview; jingle).
+  Activity Log) and *CIA banner* (style: the game's logo over a tag with a
+  pixel-art console and the year, SteamGridDB hero + logo, libretro title
+  screen or screenshot, or an image file; preview; jingle). The default
+  banner's colours and font are in Settings › Banner; a `<console>.png` in
+  the console icons folder replaces a built-in icon.
 - **Injection options**: screen (pixel perfect, recommended, full screen
   400x240 or a custom size; bilinear filter), bezel, **button mapping** (on
   a picture of the 3DS: what each button does in the game; the menu keeps

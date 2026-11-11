@@ -12,6 +12,7 @@ import random
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from forwarder3ds.artwork.banner_card import CardStyle, render_card_png
 from forwarder3ds.builder.errors import BuildError
 from forwarder3ds.builder.injector import GameRequest, request_from_project
 from forwarder3ds.builder.toolchain import Toolchain, find_toolchain
@@ -19,7 +20,7 @@ from forwarder3ds.core.core_options import CoreOptions, CoreOptionsError, load_c
 from forwarder3ds.core.cores import DEFAULT_CORES_JSON, CoreCatalogError, CoreRegistry
 from forwarder3ds.core.logs import get_logger
 from forwarder3ds.core.names import save_folder_name
-from forwarder3ds.core.projects import Project, ProjectStore
+from forwarder3ds.core.projects import Asset, BannerStyle, Project, ProjectStore
 from forwarder3ds.core.settings import Settings, load_settings
 from forwarder3ds.core.systems import DEFAULT_SYSTEMS_JSON, SystemCatalog, SystemCatalogError
 from forwarder3ds.core.title_id import (
@@ -106,6 +107,34 @@ class AppContext:  # pylint: disable=too-many-instance-attributes
         if save_folder_name(project.folder) != project.folder:
             return "The save folder name has characters an SD card cannot hold."
         return self.preview_unique_id(project)[1]
+
+    # ── Banner ───────────────────────────────────────────────────────────
+
+    def card_style(self) -> CardStyle:
+        """The default banner's colours and font, from the settings."""
+        banner = self.settings.banner
+        return CardStyle(banner.background, banner.text, banner.font)
+
+    def render_card(self, project: Project) -> bytes:
+        """``project``'s default banner (logo + console tag), as PNG data."""
+        logo_path = project.asset(Asset.LOGO)
+        try:
+            logo = logo_path.read_bytes() if logo_path else None
+        except OSError:
+            logo = None
+        return render_card_png(
+            console=project.console,
+            title=project.title,
+            name=project.tag_name,
+            year=project.tag_year,
+            logo=logo,
+            style=self.card_style(),
+        )
+
+    def refresh_card(self, project: Project) -> None:
+        """Re-render ``project``'s banner if it uses the default one (settings may have changed)."""
+        if project.banner_style is BannerStyle.CARD:
+            self.store.set_asset(project, Asset.BANNER, self.render_card(project))
 
     # ── Title IDs ────────────────────────────────────────────────────────
 
