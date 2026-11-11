@@ -3,11 +3,32 @@ ctr: optional picture for the idle touch screen
 While a game runs the touch screen only shows "Tap the Touch Screen to go
 to the Retroarch menu" as plain text. When bottom_idle.png is found next
 to bottom_menu.png (directory_bottom_assets), draw that picture instead,
-so an injected title can show a Virtual Console style screen. Without the
-file nothing changes.
+so an injected title can show a Virtual Console style screen. It is also
+drawn instead of the "Asset(s) not found" screen when bottom_menu.png is
+missing.
+
+An injected title always reads its touch screen pictures from the RomFS:
+a bottom assets folder saved in the game's retroarch.cfg by an older build
+no longer hides them.
 
 Applies on top of 0003, to RetroArch v1.22.2 (RETROARCH_REF in versions.env).
 
+--- a/frontend/drivers/platform_ctr.c
++++ b/frontend/drivers/platform_ctr.c
+@@ -289,6 +289,13 @@
+    if (!ctr_injected || !settings)
+       return;
+ 
++   /* The touch screen pictures are in the RomFS: a folder saved in the
++    * game's retroarch.cfg by an older build must not hide them. */
++   if (     path_is_valid(CTR_INJECTED_BOTTOM)
++         || path_is_valid(CTR_INJECTED_ROOT "bottom_idle.png"))
++      configuration_set_string(settings,
++            settings->paths.directory_bottom_assets, CTR_INJECTED_ROOT);
++
+    ctr_injected_bezel_overlay(overlay, sizeof(overlay));
+    if (string_is_empty(overlay))
+    {
 --- a/gfx/drivers/ctr_gfx.c
 +++ b/gfx/drivers/ctr_gfx.c
 @@ -76,6 +76,7 @@
@@ -27,7 +48,30 @@ Applies on top of 0003, to RetroArch v1.22.2 (RETROARCH_REF in versions.env).
        case CTR_TEXTURE_STATE_THUMBNAIL:
           {
              size_t _len;
-@@ -1375,6 +1378,37 @@
+@@ -1075,6 +1078,7 @@
+ {
+    unsigned i;
+    const char *dir_assets = NULL;
++   bool menu_found        = true;
+    ctr_video_t *ctr       = (ctr_video_t *)data;
+    settings_t *settings   = config_get_ptr();
+ 
+@@ -1123,10 +1127,12 @@
+          }
+       }
+       else if (i == CTR_TEXTURE_BOTTOM_MENU)
+-         return false;
++         menu_found = false;
+    }
+ 
+-   return true;
++   /* Without bottom_menu.png there is no touch screen menu, but the idle
++    * picture (if any) is still loaded. */
++   return menu_found;
+ }
+ 
+ static void save_state_to_file(void *data)
+@@ -1375,6 +1381,37 @@
     ctr->render_font_bottom = false;
  }
  
@@ -65,7 +109,17 @@ Applies on top of 0003, to RetroArch v1.22.2 (RETROARCH_REF in versions.env).
  static void ctr_render_bottom_screen(void *data)
  {
     struct font_params params  = { 0, };
-@@ -1426,6 +1460,10 @@
+@@ -1400,6 +1437,9 @@
+    switch (ctr->bottom_menu)
+    {
+       case CTR_BOTTOM_MENU_NOT_AVAILABLE:
++         if (ctr_draw_bottom_texture(ctr,
++                  &ctr->bottom_textures[CTR_TEXTURE_BOTTOM_IDLE]))
++            break;
+          {
+             size_t _len;
+             char str_path[PATH_MAX_LENGTH];
+@@ -1426,6 +1466,10 @@
              }
           break;
        case CTR_BOTTOM_MENU_DEFAULT:
