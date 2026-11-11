@@ -124,17 +124,20 @@ ra_make_var() {
 build_core() {
     local work="$1" recipe="$2" out_dir="$3" ra_dir="$1/RetroArch"
     local CORE_NAME CORE_REPO CORE_REF CORE_SUBDIR CORE_MAKEFILE CORE_LIB CORE_CFLAGS=""
-    local CORE_OPTIONS=""
+    local CORE_OPTIONS="" CORE_MAKE_ARGS=""
     # shellcheck source=retroarch/cores/gambatte.env
     source "${recipe}"
     local core_dir="${work}/cores/${CORE_NAME}" dest="${out_dir}/bases/${CORE_NAME}"
     local jobs
+    local -a make_args
     jobs="$(nproc 2> /dev/null || echo 2)"
+    read -ra make_args <<< "${CORE_MAKE_ARGS}"
 
     log "[INFO]" "Building core ${CORE_NAME} (${CORE_REF})"
     checkout "${CORE_REPO}" "${CORE_REF}" "${core_dir}"
     CFLAGS="${CORE_COMPAT_CFLAGS} ${CORE_CFLAGS}" \
-        make -C "${core_dir}/${CORE_SUBDIR}" -f "${CORE_MAKEFILE}" platform=ctr -j"${jobs}" > /dev/null
+        make -C "${core_dir}/${CORE_SUBDIR}" -f "${CORE_MAKEFILE}" platform=ctr \
+        "${make_args[@]}" -j"${jobs}" > /dev/null
     install -m 0644 "${core_dir}/${CORE_SUBDIR}/${CORE_LIB}" "${ra_dir}/libretro_ctr.a"
 
     log "[INFO]" "Linking RetroArch ${RETROARCH_REF} with ${CORE_NAME}"

@@ -189,3 +189,55 @@ def test_cli_identify(
     unknown = tmp_path / "u.gb"
     unknown.write_bytes(b"x")
     assert cli.main(["identify", str(unknown)]) == 3
+
+
+ARCADE_DAT = """clrmamepro ( name "MAME 2003" )
+game (
+\tname "Street Fighter II - The World Warrior (World 910214)"
+\tyear "1991"
+\tdeveloper "Capcom"
+\trom ( name sf2.zip size 1 crc 11111111 )
+)
+"""
+
+
+def test_arcade_romset(tmp_path: Path, systems: SystemCatalog) -> None:
+    mame = systems.require("mame")
+    romset = tmp_path / "SF2.zip"
+    with zipfile.ZipFile(romset, "w") as archive:
+        archive.writestr("sf2_30a.bin", b"\1" * 64)
+        archive.writestr("sf2_37a.bin", b"\2" * 64)
+    found = identify(romset, mame, GameDatabase.from_dats(ARCADE_DAT))
+    assert found.kind is MatchKind.SET and found.game is not None
+    assert (found.game.year, found.game.developer) == ("1991", "Capcom")
+    # a zip of several files is no console's ROM: only the arcade systems take it
+    assert {system.console for system in systems.candidates(romset)} == {"mame", "fbneo"}
+    url = thumbnail_url(mame, found.game.name, ThumbnailKind.SNAP)
+    assert url.startswith("https://thumbnails.libretro.com/MAME/Named_Snaps/")
+
+    request = make_request(rom=romset, console="mame", long_name="Street Fighter II",
+                           output=tmp_path / "o.cia")  # fmt: skip
+    assert request.arcade and request.content_name == "sf2.zip"
+    assert 'system_dir = "sdmc:/emu_bios"' in manifest_text(request)
+    base_dir = tmp_path / "base"
+    base_dir.mkdir()
+    (base_dir / "retroarch.elf").write_bytes(b"\x7fELF")
+    (base_dir / "base.env").write_text("CORE_NAME=mame2003\n", encoding="utf-8")
+    romfs = write_romfs(tmp_path / "scratch", request, Base.load(base_dir))
+    assert (romfs / "sf2.zip").read_bytes() == romset.read_bytes()  # packed as it is
+
+
+def test_zipped_cartridge_is_not_arcade(tmp_path: Path, systems: SystemCatalog) -> None:
+    rom = tmp_path / "Tetris.zip"
+    with zipfile.ZipFile(rom, "w") as archive:
+        archive.writestr("Tetris.gb", ROM_DATA)
+    assert systems.guess(rom) is not None and systems.guess(rom).console == "gb"
+
+
+def test_atari_and_lynx_headers(tmp_path: Path) -> None:
+    a78 = tmp_path / "game.a78"
+    a78.write_bytes(b"\1ATARI7800" + b"\0" * 118 + ROM_DATA)
+    assert rom_crcs(a78)[-1] == ROM_CRC
+    lynx = tmp_path / "game.lnx"
+    lynx.write_bytes(b"LYNX" + b"\0" * 60 + ROM_DATA)
+    assert rom_crcs(lynx)[-1] == ROM_CRC

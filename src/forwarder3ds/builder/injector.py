@@ -16,7 +16,9 @@ linked with one core and patched for single-game mode, see
 
 On the console the game keeps everything in one flat folder,
 ``sdmc:/saves/<console>/<game>/``: ``retroarch.cfg``, ``game.srm``,
-``game.state*``, ``game.opt``... BIOS files go in ``sdmc:/saves/bios/``.
+``game.state*``, ``game.opt``... BIOS files go in ``sdmc:/emu_bios/``.
+An arcade romset keeps its own name instead of ``game`` (``sf2.zip``, so
+``sf2.srm``...): the emulator recognizes the game by it.
 A ``bezel.png`` dropped in that folder replaces the CIA's own bezel.
 
 :func:`build_game` is the single entry point for the CLI and the GUI. It
@@ -77,7 +79,7 @@ SMDH_FLAGS_UNRECORDED = "visible"
 #: Root of every game's data folder on the SD card.
 SAVES_ROOT = "sdmc:/saves"
 #: Shared BIOS folder (RetroArch's "system" directory) of every game.
-BIOS_DIR = f"{SAVES_ROOT}/bios"
+BIOS_DIR = "sdmc:/emu_bios"
 #: Base name of the ROM inside the RomFS, hence of its saves (game.srm...).
 CONTENT_STEM = "game"
 MANIFEST_FILE = "manifest.cfg"
@@ -125,6 +127,8 @@ class GameRequest:  # pylint: disable=too-many-instance-attributes
     bezel: Path | None = None
     #: The ROM's own file name; for a ``.zip``, the name of the ROM inside it.
     rom_name: str = ""
+    #: An arcade romset: packed as it is, under its own name.
+    arcade: bool = False
     #: Screen scaling and filtering (``None``: RetroArch's defaults).
     screen: ScreenSettings | None = None
     #: Initial core options (key -> value), written as ``game.opt``.
@@ -151,8 +155,14 @@ class GameRequest:  # pylint: disable=too-many-instance-attributes
 
     @property
     def content_name(self) -> str:
-        """The ROM's name inside the RomFS: ``game`` plus its extension, lowercase."""
-        return CONTENT_STEM + Path(self.rom_name or self.rom.name).suffix.lower()
+        """The ROM's name inside the RomFS: ``game`` plus its extension, lowercase.
+
+        An arcade romset keeps its own (lowercase) name: it is the game's identity.
+        """
+        name = self.rom_name or self.rom.name
+        if self.arcade:
+            return name.lower()
+        return CONTENT_STEM + Path(name).suffix.lower()
 
     def identity(self) -> GameIdentity:
         """The fields the Title ID is derived from."""
@@ -327,7 +337,7 @@ def write_romfs(directory: Path, request: GameRequest, base: Base) -> Path:
         shutil.copytree(base.romfs, romfs, dirs_exist_ok=True)
     romfs.mkdir(parents=True, exist_ok=True)
     try:
-        if is_archive(request.rom):  # pack the ROM itself: nothing to extract on the console
+        if is_archive(request.rom) and not request.arcade:  # nothing to extract on the console
             extensions = load_systems().require(request.console).extensions
             extract(request.rom, extensions, romfs / request.content_name)
         else:
@@ -480,7 +490,9 @@ def build_game(
     validate_request(request, cores, load_systems())
     base = tools.base(request.core)
     if base.big_text_section:
-        raise BuildError(f"The {request.core} base needs svchax (big text section): unsupported.")
+        # The MAME and FB Alpha 2012 bases: RetroArch takes kernel access
+        # (svchax) at boot, which Luma3DS grants through the backdoor SVC.
+        _log.info("The %s base uses svchax (big text section)", request.core)
     unique_id = _assign_title_id(request, cores, registry_path)
 
     _log.info("Core %s, console %s, ROM %s", request.core, request.console, request.rom.name)
@@ -563,7 +575,9 @@ def make_request(  # pylint: disable=too-many-arguments
     if not core.strip():
         core = system.core if system else ""
     rom_name = rom.name
-    if system is not None and is_archive(rom):
+    if system is not None and system.arcade:
+        extra.setdefault("arcade", True)
+    elif system is not None and is_archive(rom):
         try:
             rom_name = inner_name(rom, system.extensions)
         except ArchiveError as exc:

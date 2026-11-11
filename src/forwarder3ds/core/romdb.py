@@ -10,7 +10,9 @@ This module parses those clrmamepro-format files and matches a ROM:
   the CRC32 the zip stores for it;
 * **discs** (``.chd``/``.pbp``) by name: hashing a CHD's tracks is not
   practical, so the file name is compared with the dat's game names. Such a
-  match is only a guess and is reported as such.
+  match is only a guess and is reported as such;
+* **arcade romsets** by the zip's name (``sf2.zip``), which is what the
+  emulator itself goes by. Arcade dats carry the year and maker inline.
 
 A ROM that does not match (a hack, a translation, a bad dump) is reported
 as unknown; the user can still pick its entry by hand (:meth:`GameDatabase.search`).
@@ -43,12 +45,15 @@ _SEARCH_LIMIT = 200
 # Headers some dumps carry in front of the ROM data.
 _SNES_COPIER_HEADER = 512
 _INES_MAGIC, _FWNES_MAGIC, _NES_HEADER = b"NES\x1a", b"FDS\x1a", 16
+_A78_MAGIC, _A78_HEADER = b"ATARI7800", 128  # at offset 1
+_LYNX_MAGIC, _LYNX_HEADER = b"LYNX", 64
 
 
 class MatchKind(enum.Enum):
     """How a ROM was tied to its database entry."""
 
     CRC = "crc"  # the file's checksum is in the dat: certain
+    SET = "set"  # arcade: the romset's name is in the dat
     NAME = "name"  # discs: the file name looks like a dat entry: a guess
     MANUAL = "manual"  # chosen by the user
     NONE = "none"  # not in the database
@@ -64,6 +69,8 @@ class DbGame:
     publisher: str = ""
     developer: str = ""
     year: str = ""
+    #: The dat's ROM file names, lower case (an arcade entry's ``set.zip``).
+    files: tuple[str, ...] = ()
 
     @property
     def title(self) -> str:
@@ -143,6 +150,21 @@ def _rom_crcs(block: dict[str, object]) -> tuple[int, ...]:
     return tuple(crc for crc in found if crc is not None)
 
 
+def _rom_files(block: dict[str, object]) -> tuple[str, ...]:
+    roms = block.get("rom", [])
+    names = [str(rom.get("name", "")) for rom in roms if isinstance(rom, dict)]
+    return tuple(name.casefold() for name in names if name)
+
+
+def _inline(block: dict[str, object], *keys: str) -> str:
+    """The first of ``keys`` the entry itself has (arcade dats keep the year and maker inline)."""
+    for key in keys:
+        value = block.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
 def _rom_serial(block: dict[str, object]) -> str:
     serial = block.get("serial", "")
     if serial:
@@ -162,9 +184,12 @@ class GameDatabase:
     def __init__(self, games: list[DbGame]) -> None:
         self._games = sorted(games, key=lambda game: game.name.casefold())
         self._by_crc: dict[int, DbGame] = {}
+        self._by_file: dict[str, DbGame] = {}
         for game in self._games:
             for crc in game.crcs:
                 self._by_crc.setdefault(crc, game)
+            for name in game.files:
+                self._by_file.setdefault(name, game)
 
     @classmethod
     def from_dats(cls, main: str, extras: dict[str, str] | None = None) -> "GameDatabase":
@@ -191,9 +216,11 @@ class GameDatabase:
                     name=name,
                     crcs=crcs,
                     serial=_rom_serial(block),
-                    publisher=extra.get("publisher", ""),
-                    developer=extra.get("developer", ""),
-                    year=extra.get("releaseyear", ""),
+                    publisher=extra.get("publisher", "")
+                    or _inline(block, "publisher", "manufacturer"),
+                    developer=extra.get("developer", "") or _inline(block, "developer"),
+                    year=extra.get("releaseyear", "") or _inline(block, "releaseyear", "year"),
+                    files=_rom_files(block),
                 )
             )
         return cls(games)
@@ -209,6 +236,10 @@ class GameDatabase:
     def by_crc(self, crc: int) -> DbGame | None:
         """The entry with a ROM of this CRC32, or ``None``."""
         return self._by_crc.get(crc)
+
+    def by_file(self, file_name: str) -> DbGame | None:
+        """The entry with a ROM file called ``file_name`` (an arcade set's zip), or ``None``."""
+        return self._by_file.get(file_name.casefold())
 
     def by_name(self, name: str) -> DbGame | None:
         """The entry called exactly ``name`` (case-insensitive), or ``None``."""
@@ -268,15 +299,19 @@ def rom_crcs(path: Path, extensions: Iterable[str] = ()) -> list[int]:
     """
     member = rom_member(path, extensions) if is_archive(path) else None
     with _open_rom(path, member) as handle:
-        magic = handle.read(4)
+        magic = handle.read(10)
     if member is not None:  # the zip already knows the CRC of the whole ROM
         size, crcs = member.file_size, [member.CRC]
     else:
         with _open_rom(path, member) as handle:
             size, crcs = path.stat().st_size, [_crc32(handle, 0)]
     skips = []
-    if magic in (_INES_MAGIC, _FWNES_MAGIC) and size > _NES_HEADER:
+    if magic[:4] in (_INES_MAGIC, _FWNES_MAGIC) and size > _NES_HEADER:
         skips.append(_NES_HEADER)
+    if magic[1:10] == _A78_MAGIC and size > _A78_HEADER:
+        skips.append(_A78_HEADER)
+    if magic[:4] == _LYNX_MAGIC and size > _LYNX_HEADER:
+        skips.append(_LYNX_HEADER)
     if size % 1024 == _SNES_COPIER_HEADER:
         skips.append(_SNES_COPIER_HEADER)
     for skip in skips:
@@ -287,6 +322,9 @@ def rom_crcs(path: Path, extensions: Iterable[str] = ()) -> list[int]:
 
 def identify(path: Path, system: System, database: GameDatabase) -> Identification:
     """Match ``path`` (a ROM of ``system``) against ``database``."""
+    if system.arcade:
+        game = database.by_file(path.name)
+        return Identification(MatchKind.SET, game) if game else Identification(MatchKind.NONE)
     if system.is_disc:
         candidates = database.like(path.stem)
         if not candidates:

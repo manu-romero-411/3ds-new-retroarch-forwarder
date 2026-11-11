@@ -47,6 +47,13 @@ CONSOLE_SCREENS: dict[str, ConsoleScreen] = {
     "pcengine": ConsoleScreen(256, 232, _FOUR_THIRDS),
     "pcenginecd": ConsoleScreen(256, 232, _FOUR_THIRDS),
     "psx": ConsoleScreen(320, 240, _FOUR_THIRDS),
+    "atari2600": ConsoleScreen(160, 210, _FOUR_THIRDS),
+    "atari7800": ConsoleScreen(320, 223, _FOUR_THIRDS),
+    "lynx": ConsoleScreen(160, 102, 160 / 102),
+    "pokemini": ConsoleScreen(96, 64, 3 / 2),
+    "sega32x": ConsoleScreen(320, 224, _FOUR_THIRDS),
+    "mame": ConsoleScreen(320, 224, _FOUR_THIRDS),
+    "fbneo": ConsoleScreen(320, 224, _FOUR_THIRDS),
 }
 DEFAULT_SCREEN = ConsoleScreen(256, 224, _FOUR_THIRDS)
 

@@ -102,7 +102,8 @@ def load_database(system: System, refresh: bool = False) -> GameDatabase:
     if main is None:
         raise DatabaseUnavailableError(f"libretro has no {system.database} dat for {system.name}.")
     extras = {}
-    for field_name in METADATA_FIELDS:
+    # Arcade dats carry the year and maker themselves; there are no side dats.
+    for field_name in () if system.arcade else METADATA_FIELDS:
         try:
             text = _cached_dat(field_name, system, refresh)
         except DatabaseUnavailableError as exc:
@@ -118,13 +119,13 @@ def load_database(system: System, refresh: bool = False) -> GameDatabase:
 def thumbnail_url(system: System, game_name: str, kind: ThumbnailKind) -> str:
     """Where libretro keeps ``kind`` for the dat entry ``game_name``."""
     file_name = game_name.translate(_THUMBNAIL_FORBIDDEN) + ".png"
-    return f"{THUMBNAIL_BASE_URL}/{quote(system.libretro)}/{kind.value}/{quote(file_name)}"
+    return f"{THUMBNAIL_BASE_URL}/{quote(system.thumbnail_system)}/{kind.value}/{quote(file_name)}"
 
 
 def fetch_thumbnail(system: System, game_name: str, kind: ThumbnailKind) -> bytes | None:
     """The PNG of ``kind`` for ``game_name`` (cached), or ``None`` if libretro has none."""
     file_name = game_name.translate(_THUMBNAIL_FORBIDDEN) + ".png"
-    cached = _cache_root() / "thumbnails" / system.libretro / kind.value / file_name
+    cached = _cache_root() / "thumbnails" / system.thumbnail_system / kind.value / file_name
     if cached.is_file():
         return cached.read_bytes()
     try:

@@ -233,9 +233,20 @@ RETROPAD_LABELS: dict[str, str] = {
 _GENESIS = {"b": "B", "a": "C", "y": "A", "x": "Y", "l": "X", "r": "Z", "select": "Mode"}
 _MASTER = {"b": "1", "a": "2", "start": "Pause"}
 _PCE = {"a": "I", "b": "II", "select": "Select", "start": "Run"}
+_ARCADE = {
+    "b": "Button 1", "a": "Button 2", "y": "Button 3", "x": "Button 4",
+    "l": "Button 5", "r": "Button 6", "select": "Coin", "start": "Start",
+}  # fmt: skip
 #: What the game's own controller calls each RetroPad button, by console
 #: (as the console's default core lays them out). Only the buttons it has.
 CONSOLE_LABELS: dict[str, dict[str, str]] = {
+    "atari2600": {
+        "b": "Fire", "select": "Select", "start": "Reset",
+        "l": "Left difficulty", "r": "Right difficulty",
+    },
+    "atari7800": {"b": "Fire 1", "a": "Fire 2", "select": "Select", "start": "Pause"},
+    "lynx": {"a": "A", "b": "B", "l": "Option 1", "r": "Option 2", "start": "Pause"},
+    "pokemini": {"a": "A", "b": "B", "r": "C", "l": "Shake", "select": "Power"},
     "gb": {"a": "A", "b": "B", "start": "Start", "select": "Select"},
     "gbc": {"a": "A", "b": "B", "start": "Start", "select": "Select"},
     "gba": {"a": "A", "b": "B", "l": "L", "r": "R", "start": "Start", "select": "Select"},
@@ -247,6 +258,7 @@ CONSOLE_LABELS: dict[str, dict[str, str]] = {
     },
     "megadrive": _GENESIS | {"start": "Start"},
     "segacd": _GENESIS | {"start": "Start"},
+    "sega32x": _GENESIS | {"start": "Start"},
     "mastersystem": _MASTER,
     "sg1000": _MASTER,
     "gamegear": {"b": "1", "a": "2", "start": "Start"},
@@ -257,6 +269,8 @@ CONSOLE_LABELS: dict[str, dict[str, str]] = {
         "l": "L1", "r": "R1", "l2": "L2", "r2": "R2", "l3": "L3", "r3": "R3",
         "start": "Start", "select": "Select",
     },
+    "mame": _ARCADE,
+    "fbneo": _ARCADE,
 }  # fmt: skip
 _DPAD = ("up", "down", "left", "right")
 

@@ -55,13 +55,23 @@ with its core option definitions (see `gambatte.env` for the format). Which cons
 
 | Core | Consoles | Notes |
 |---|---|---|
-| gambatte | gb, gbc | |
-| gpsp | gba | needs `gba_bios.bin` in `sdmc:/saves/bios` |
+| stella2014 | atari2600 | |
+| prosystem | atari7800 | optional BIOS `7800 BIOS (U).rom` |
+| handy | lynx | needs `lynxboot.img` |
 | fceumm | nes, fds | FDS needs `disksys.rom` |
+| nestopia | nes, fds (alternative) | FDS needs `disksys.rom` |
 | snes9x2005 | snes | |
-| genesis_plus_gx | mastersystem, megadrive, gamegear, sg1000, segacd | Mega-CD needs its BIOS |
+| gambatte | gb, gbc | |
+| gpsp | gba | needs `gba_bios.bin` |
+| pokemini | pokemini | optional BIOS `bios.min` |
+| genesis_plus_gx | sg1000, mastersystem, megadrive, segacd, gamegear | Mega-CD needs `bios_CD_U.bin` / `_E` / `_J` |
+| picodrive | sega32x; alternative for the Sega consoles | Mega-CD as above |
 | mednafen_pce_fast | pcengine, pcenginecd | PC Engine CD needs `syscard3.pce` |
-| pcsx_rearmed | psx | `.chd` or `.pbp`; a BIOS is recommended |
+| pcsx_rearmed | psx | one-disc `.chd` or `.pbp`; a BIOS (`scph5501.bin`...) is recommended |
+| mame2003, mame2000 | mame | 0.78 / 0.37b5 romsets; use non-merged sets |
+| fbneo_neogeo, fbneo_cps12 | fbneo | FinalBurn Neo's Neo Geo and CPS-1/2 subsets (the whole FBNeo does not fit); `neogeo.zip` in `sdmc:/emu_bios/fbneo/` |
+| fbalpha2012 (+ _cps1, _cps2, _cps3, _neogeo) | fbneo (alternatives) | 0.2.97.29 romsets |
 
-Cores that need RetroArch's "big text section" (svchax: fbalpha2012,
-mame2000, mame2003, mame2003_plus) are not supported yet.
+BIOS files go in `sdmc:/emu_bios/` (RetroArch's system folder for every
+game). The MAME and FB Alpha 2012 bases need RetroArch's "big text section":
+they take kernel access (svchax) at boot, which Luma3DS allows.

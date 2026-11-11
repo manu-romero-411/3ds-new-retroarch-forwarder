@@ -13,6 +13,12 @@ No-Intro dat (cartridges, by CRC) or a Redump one (discs, by name).
 ``core`` is the console's default RetroArch core; ``alternatives`` lists
 other bases that can run it (another core, or a standalone emulator such
 as ``snes9x_3ds``).
+
+Arcade systems (``"arcade": true``) take romsets: a ``.zip`` named after
+the set (``sf2.zip``), copied into the CIA as it is, under its own name, and
+identified by that name (``database`` is then the dat folder, e.g.
+``mame-nonmerged``). ``thumbnails`` names libretro's thumbnail folder when
+it is not the dat's name (``MAME``).
 """
 
 from __future__ import annotations
@@ -44,6 +50,15 @@ class System:
     database: str = "no-intro"
     #: Other emulators that can run this console's games (``core`` is the default).
     alternatives: tuple[str, ...] = ()
+    #: Romsets: kept zipped, under their own name, and identified by it.
+    arcade: bool = False
+    #: libretro's thumbnail folder, when it is not ``libretro``.
+    thumbnails: str = ""
+
+    @property
+    def thumbnail_system(self) -> str:
+        """The folder of this system on thumbnails.libretro.com."""
+        return self.thumbnails or self.libretro
 
     @property
     def cores(self) -> tuple[str, ...]:
@@ -57,6 +72,8 @@ class System:
 
     def accepts(self, rom: Path) -> bool:
         """True if ``rom`` (or the one ROM inside a ``.zip``) is of a type this console takes."""
+        if self.arcade:
+            return rom.suffix.lower().lstrip(".") in self.extensions
         if is_archive(rom):
             try:
                 rom_member(rom, self.extensions)
@@ -87,6 +104,8 @@ class SystemCatalog:
                     libretro=data.get("libretro", ""),
                     database=data.get("database", "no-intro"),
                     alternatives=tuple(data.get("alternatives", ())),
+                    arcade=bool(data.get("arcade", False)),
+                    thumbnails=data.get("thumbnails", ""),
                 )
                 for console, data in raw.items()
             }
@@ -107,8 +126,14 @@ class SystemCatalog:
         return system
 
     def candidates(self, rom: Path) -> list[System]:
-        """Every console that takes ``rom``'s file type."""
-        return [system for system in self._systems.values() if system.accepts(rom)]
+        """Every console that takes ``rom``'s file type.
+
+        Arcade systems take any ``.zip``: they only count when no console
+        recognizes the ROM inside.
+        """
+        found = [system for system in self._systems.values() if system.accepts(rom)]
+        consoles = [system for system in found if not system.arcade]
+        return consoles or found
 
     def guess(self, rom: Path) -> System | None:
         """The console for ``rom`` if its extension points to exactly one."""

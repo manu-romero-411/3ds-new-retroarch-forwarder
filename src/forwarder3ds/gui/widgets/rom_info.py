@@ -152,6 +152,7 @@ class RomInfo(QWidget):  # pylint: disable=too-many-instance-attributes
         statuses = {
             MatchKind.CRC: self.tr("✔ Verified dump{crc}").format(crc=crc_text),
             MatchKind.NAME: self.tr("⚠ Matched by file name only: check it"),
+            MatchKind.SET: self.tr("✔ Romset found by its name"),
             MatchKind.MANUAL: self.tr("✔ Chosen by hand"),
             MatchKind.NONE: self.tr(
                 "⚠ Not in the database{crc}: a hack, a translation or another revision? "
