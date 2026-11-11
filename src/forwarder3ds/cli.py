@@ -176,6 +176,7 @@ def _request_from_args(args: argparse.Namespace, settings: Settings, scratch: Pa
         banner=images.banner,
         audio=jingle or args.audio or (assets.audio if assets else None),
         platform_logo=platform_logo,
+        bezel=None if args.no_bezel else (args.bezel or (assets.bezel if assets else None)),
         manual_unique_id=unique_id,
         replace_existing_id=loaded is not None and unique_id == loaded.unique_id,
     )
@@ -219,6 +220,7 @@ def _cmd_inspect(args: argparse.Namespace, _settings: Settings) -> int:
         ("Console", loaded.console),
         ("Saves", f"sdmc:/saves/{loaded.console}/{loaded.folder}"),
         ("ROM", f"{loaded.rom_name} ({loaded.rom_size} bytes)"),
+        ("Bezel", "yes" if loaded.bezel_png else "no"),
         ("Short name", loaded.short_name),
         ("Long name", loaded.long_name),
         ("Manufacturer", loaded.manufacturer),
@@ -237,7 +239,7 @@ def _cmd_inspect(args: argparse.Namespace, _settings: Settings) -> int:
         except CiaReadError as exc:
             _log.error("%s", exc)
             return 1
-        for path in (written.icon, written.banner, written.audio, rom):
+        for path in (written.icon, written.banner, written.audio, written.bezel, rom):
             if path:
                 log_success(_log, "Wrote %s", path)
     return 0
@@ -378,6 +380,13 @@ def _add_build_parser(sub: argparse._SubParsersAction) -> None:
     art.add_argument("--logo", type=Path, help="game logo pasted over the hero")
     art.add_argument("--banner", type=Path, help="ready-made banner (replaces hero + logo)")
     art.add_argument("--platform-logo", help="frame drawn over the banner: catalog name or PNG")
+    bezel = art.add_mutually_exclusive_group()
+    bezel.add_argument(
+        "--bezel",
+        type=Path,
+        help="top screen bezel, any size (stretched to 400x240; transparent where the game shows)",
+    )
+    bezel.add_argument("--no-bezel", action="store_true", help="drop the loaded CIA's bezel")
 
     sound = build.add_argument_group("jingle").add_mutually_exclusive_group()
     sound.add_argument("--jingle", help="catalog name or 16-bit PCM WAV (≤ 3 s)")

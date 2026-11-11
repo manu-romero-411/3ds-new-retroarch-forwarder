@@ -340,6 +340,7 @@ class MainWindow(QMainWindow):  # pylint: disable=too-many-instance-attributes
                 short_name=fields.short_name,
                 manufacturer=fields.manufacturer,
                 output=output,
+                bezel=Path(fields.bezel) if fields.bezel else None,
                 systems=self._systems,
                 **extra,
             )
@@ -458,6 +459,7 @@ class MainWindow(QMainWindow):  # pylint: disable=too-many-instance-attributes
                 short_name=loaded.short_name,
                 long_name=loaded.long_name,
                 manufacturer=loaded.manufacturer,
+                bezel=str(assets.bezel) if assets.bezel else "",
             )
         )
         self._presentation.load_from_cia(

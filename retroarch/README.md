@@ -33,7 +33,9 @@ Written against the RetroArch release in `RETROARCH_REF`; bump both together.
   manifest's `data_dir` (`sdmc:/saves/<console>/<game>`), seeding its
   `retroarch.cfg` from `romfs:/retroarch.cfg` on first boot. The core info
   folder points at the RomFS, so startup does not parse the `.info` files of
-  `sdmc:/retroarch/cores/info`.
+  `sdmc:/retroarch/cores/info`. Once the content is loaded, the game's
+  `bezel.png` (from `data_dir`, else from the RomFS) is shown as a full
+  screen overlay; with none, overlays are turned off.
 - `0002-ctr-bottom-menu-null-texture.patch`: fixes a crash of RetroArch's
   touch screen menu when `bottom_menu.png` is missing (upstream bug).
 

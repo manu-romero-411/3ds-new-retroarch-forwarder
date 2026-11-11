@@ -6,7 +6,8 @@ linked with one core and patched for single-game mode, see
 
 * a flat RomFS holding the ROM as ``game.<ext>``, ``manifest.cfg`` (where
   the game keeps its data on the SD card, plus the fields needed to read
-  the CIA back), the seed ``retroarch.cfg`` and the touch screen asset;
+  the CIA back), the seed ``retroarch.cfg``, the touch screen asset and,
+  optionally, a top screen bezel (``bezel.png`` + its overlay ``bezel.cfg``);
 * an SMDH icon and a banner made by ``bannertool``;
 * a Title ID that is deterministic and collision-checked
   (:mod:`forwarder3ds.core.title_id`).
@@ -14,6 +15,7 @@ linked with one core and patched for single-game mode, see
 On the console the game keeps everything in one flat folder,
 ``sdmc:/saves/<console>/<game>/``: ``retroarch.cfg``, ``game.srm``,
 ``game.state*``, ``game.opt``... BIOS files go in ``sdmc:/saves/bios/``.
+A ``bezel.png`` dropped in that folder replaces the CIA's own bezel.
 
 :func:`build_game` is the single entry point for the CLI and the GUI. It
 reports progress through the ``forwarder3ds.build`` logger and raises
@@ -31,7 +33,12 @@ from pathlib import Path
 from typing import Any
 
 from forwarder3ds.builder.errors import BuildError
-from forwarder3ds.builder.media import prepare_banner_audio, prepare_banner_image, prepare_icon
+from forwarder3ds.builder.media import (
+    prepare_banner_audio,
+    prepare_banner_image,
+    prepare_bezel,
+    prepare_icon,
+)
 from forwarder3ds.builder.placeholders import ensure_placeholder_assets
 from forwarder3ds.builder.toolchain import Base, Toolchain, run_tool
 from forwarder3ds.core.catalog import validate_platform_logo
@@ -65,6 +72,16 @@ CONTENT_STEM = "game"
 MANIFEST_FILE = "manifest.cfg"
 SEED_CONFIG_FILE = "retroarch.cfg"
 BOTTOM_MENU_FILE = "bottom_menu.png"
+BEZEL_FILE = "bezel.png"
+BEZEL_OVERLAY_FILE = "bezel.cfg"
+#: RetroArch overlay showing ``bezel.png`` over the whole top screen (the same
+#: text the patched RetroArch writes next to a bezel.png on the SD card).
+BEZEL_OVERLAY = (
+    "overlays = 1\n"
+    f'overlay0_overlay = "{BEZEL_FILE}"\n'
+    "overlay0_full_screen = true\n"
+    "overlay0_descs = 0\n"
+)
 CORE_OPTIONS_FILE = "game.opt"
 #: makerom's BasicInfo Title is limited to 64 bytes.
 _RSF_TITLE_MAX = 64
@@ -88,6 +105,8 @@ class GameRequest:  # pylint: disable=too-many-instance-attributes
     audio: Path | None = None
     #: PNG (256x128, with transparency) drawn over the finished banner.
     platform_logo: Path | None = None
+    #: Top screen bezel (any image; scaled to 400x240, transparency kept).
+    bezel: Path | None = None
     manual_unique_id: int | None = None
     #: Set when rebuilding a CIA loaded from disk under its original Title
     #: ID: lets ``manual_unique_id`` take over an ID that the registry still
@@ -195,6 +214,7 @@ def validate_request(request: GameRequest, cores: CoreRegistry, systems: SystemC
         ("banner", request.banner),
         ("audio", request.audio),
         ("platform logo", request.platform_logo),
+        ("bezel", request.bezel),
     ):
         if path is not None and not path.is_file():
             raise BuildError(f"The {label} file does not exist: {path}")
@@ -255,7 +275,8 @@ def seed_config_text(request: GameRequest) -> str:
     return f"{base.rstrip()}\n\n# --- This game ---\ncore_options_path = {_quote(options)}\n"
 
 
-def _write_romfs(directory: Path, request: GameRequest, base: Base) -> Path:
+def write_romfs(directory: Path, request: GameRequest, base: Base) -> Path:
+    """Lay out the CIA's RomFS in ``directory/romfs`` and return that folder."""
     romfs = directory / "romfs"
     romfs.mkdir(parents=True, exist_ok=True)
     try:
@@ -268,6 +289,9 @@ def _write_romfs(directory: Path, request: GameRequest, base: Base) -> Path:
         shutil.copyfile(base.bottom_menu, romfs / BOTTOM_MENU_FILE)
     else:
         _log.warning("The %s base has no bottom_menu.png: no touch screen menu", base.core)
+    if request.bezel is not None:
+        prepare_bezel(request.bezel, romfs / BEZEL_FILE)
+        (romfs / BEZEL_OVERLAY_FILE).write_text(BEZEL_OVERLAY, encoding="utf-8")
     return romfs
 
 
@@ -364,7 +388,7 @@ def build_game(
 
     with tempfile.TemporaryDirectory(prefix="3ds-injector-") as scratch_name:
         scratch = Path(scratch_name)
-        romfs = _write_romfs(scratch, request, base)
+        romfs = write_romfs(scratch, request, base)
 
         placeholder_icon, placeholder_banner, _audio = ensure_placeholder_assets(
             scratch / "placeholders"

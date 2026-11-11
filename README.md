@@ -17,11 +17,15 @@ RetroArch installed and never touches `sdmc:/retroarch`.
   ├── retroarch.cfg       the game's RetroArch settings
   ├── game.srm            in-game save
   ├── game.state*         save states (+ thumbnails)
-  └── game.opt            core options
+  ├── game.opt            core options
+  └── bezel.png           optional: replaces the CIA's bezel (bezel.cfg appears next to it)
   sdmc:/saves/bios/       BIOS files shared by every game
   ```
 
   `<console>` is Batocera's folder name (`gb`, `snes`, `megadrive`, `psx`...).
+- An optional **bezel** over the top screen (`--bezel`, 400x240 with a
+  transparent window: a 4:3 game is the middle 320x240), replaceable per
+  game by dropping a `bezel.png` in its save folder.
 - A trimmed pause menu: the touch screen shows RetroArch's 3DS menu
   (resume, save state, load state) and the Quick Menu keeps only what makes
   sense for one game. CD games are single `.chd` files.
@@ -96,6 +100,7 @@ the toolchain (with overrides) and your own jingle and logo folders.
 3ds-forwarder build --rom "Castlevania (USA).chd" --console psx   # .chd: say which console
 3ds-forwarder build ... --core snes9x2005 --folder "SMW" --long-name "Super Mario World"
 3ds-forwarder build ... --icon icon.png --hero hero.png --logo logo.png --platform-logo snes
+3ds-forwarder build ... --bezel snes-frame.png   # top screen bezel
 3ds-forwarder build ... --dry-run               # only print the Title ID and save folder
 3ds-forwarder build --from-cia game.cia --short-name "SMW"   # rebuild, same Title ID
 3ds-forwarder inspect game.cia [--extract DIR]  # what a game CIA contains (and its ROM)

@@ -90,6 +90,8 @@ _MANIFEST_LINE = re.compile(r'^\s*([A-Za-z0-9_]+)\s*=\s*"([^"]*)"\s*$')
 _MANIFEST_KEYS = ("content", "core", "console", "game")
 _MAX_TEXT_FILE_SIZE = 4096
 _MAX_EXEFS_FILE_SIZE = 8 * 1024 * 1024
+BEZEL_FILE = "bezel.png"
+_MAX_BEZEL_SIZE = 4 * 1024 * 1024
 _COPY_CHUNK = 1024 * 1024
 
 
@@ -100,6 +102,7 @@ class LoadedAssets:
     icon: Path | None
     banner: Path | None
     audio: Path | None
+    bezel: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -133,6 +136,7 @@ class LoadedGame:  # pylint: disable=too-many-instance-attributes
     icon_png: bytes | None = None
     banner_png: bytes | None = None
     audio_wav: bytes | None = None
+    bezel_png: bytes | None = None
     warnings: tuple[str, ...] = ()
 
     @property
@@ -174,6 +178,7 @@ class LoadedGame:  # pylint: disable=too-many-instance-attributes
             icon=_write_optional(directory / "loaded_icon.png", self.icon_png),
             banner=_write_optional(directory / "loaded_banner.png", self.banner_png),
             audio=_write_optional(directory / "loaded_audio.wav", self.audio_wav),
+            bezel=_write_optional(directory / "loaded_bezel.png", self.bezel_png),
         )
 
 
@@ -398,6 +403,12 @@ def read_game_cia(path: Path) -> LoadedGame:
             ncch = _parse_ncch(handle, ncch_offset)
             files = _romfs_root_files(handle, ncch)
             manifest = _read_manifest(handle, files)
+            bezel = files.get(BEZEL_FILE)
+            bezel_png = (
+                _read_exact(handle, bezel.offset, bezel.size, BEZEL_FILE)
+                if bezel is not None and bezel.size <= _MAX_BEZEL_SIZE
+                else None
+            )
             icon_blob = _read_exefs_file(handle, ncch, ICON_FILE)
             banner_blob = _read_exefs_file(handle, ncch, BANNER_FILE)
     except OSError as exc:
@@ -420,5 +431,6 @@ def read_game_cia(path: Path) -> LoadedGame:
         icon_png=icon_png,
         banner_png=banner_png,
         audio_wav=audio_wav,
+        bezel_png=bezel_png,
         warnings=tuple(warnings),
     )

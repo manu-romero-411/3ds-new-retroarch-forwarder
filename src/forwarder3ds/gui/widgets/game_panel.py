@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (
 from forwarder3ds.core.names import save_folder_name, suggest_title
 from forwarder3ds.core.settings import DEFAULT_MANUFACTURER
 from forwarder3ds.core.systems import SystemCatalog
+from forwarder3ds.gui.widgets.path_picker import PathPicker
 
 
 @dataclass
@@ -45,6 +46,7 @@ class GameFields:
     short_name: str
     long_name: str
     manufacturer: str
+    bezel: str = ""
 
 
 class GamePanel(QWidget):  # pylint: disable=too-many-instance-attributes
@@ -85,11 +87,17 @@ class GamePanel(QWidget):  # pylint: disable=too-many-instance-attributes
         self._short_name_edit = QLineEdit()
         self._short_name_edit.setPlaceholderText(self.tr("Same as the long name"))
         self._manufacturer_edit = QLineEdit(DEFAULT_MANUFACTURER)
+        self._bezel = PathPicker(
+            select_dir=False,
+            placeholder=self.tr("None"),
+            file_filter=self.tr("Images (*.png *.webp *.jpg *.jpeg);;All files (*)"),
+        )
 
         column = QVBoxLayout(self)
         column.setContentsMargins(0, 0, 0, 0)
         column.addWidget(self._build_game_group())
         column.addWidget(self._build_names_group())
+        column.addWidget(self._build_ingame_group())
         column.addStretch(1)
 
         self._rom_edit.textChanged.connect(self._on_rom_changed)
@@ -103,6 +111,7 @@ class GamePanel(QWidget):  # pylint: disable=too-many-instance-attributes
             self._short_name_edit,
             self._long_name_edit,
             self._manufacturer_edit,
+            self._bezel.edit,
         ):
             edit.textChanged.connect(self.changed)
 
@@ -143,6 +152,21 @@ class GamePanel(QWidget):  # pylint: disable=too-many-instance-attributes
         form.addRow(self.tr("Long name:"), self._long_name_edit)
         form.addRow(self.tr("Short name:"), self._short_name_edit)
         form.addRow(self.tr("Manufacturer:"), self._manufacturer_edit)
+        return group
+
+    def _build_ingame_group(self) -> QGroupBox:
+        group = QGroupBox(self.tr("In game"))
+        form = QFormLayout(group)
+        form.addRow(self.tr("Bezel:"), self._bezel)
+        hint = QLabel(
+            self.tr(
+                "Drawn over the top screen (400x240); the game shows through its "
+                "transparent part. A bezel.png in the save folder replaces it."
+            )
+        )
+        hint.setWordWrap(True)
+        hint.setForegroundRole(QPalette.ColorRole.PlaceholderText)
+        form.addRow("", hint)
         return group
 
     # ── Configuration ────────────────────────────────────────────────────
@@ -208,6 +232,7 @@ class GamePanel(QWidget):  # pylint: disable=too-many-instance-attributes
             short_name=self._short_name_edit.text().strip() or long_name,
             long_name=long_name,
             manufacturer=self._manufacturer_edit.text().strip() or self._default_manufacturer,
+            bezel=self._bezel.text(),
         )
 
     def missing(self) -> str | None:  # pylint: disable=too-many-return-statements
@@ -229,6 +254,8 @@ class GamePanel(QWidget):  # pylint: disable=too-many-instance-attributes
             return self.tr("Enter the long name.")
         if save_folder_name(fields.folder) != fields.folder:
             return self.tr("The save folder name has characters an SD card cannot hold.")
+        if fields.bezel and not Path(fields.bezel).is_file():
+            return self.tr("The bezel file does not exist.")
         return None
 
     def set_fields(self, fields: GameFields) -> None:
@@ -240,6 +267,7 @@ class GamePanel(QWidget):  # pylint: disable=too-many-instance-attributes
         self._long_name_edit.setText(fields.long_name)
         self._folder_edit.setText(fields.folder)
         self._manufacturer_edit.setText(fields.manufacturer)
+        self._bezel.set_text(fields.bezel)
 
     def reset(self) -> None:
         """Back to an empty form."""

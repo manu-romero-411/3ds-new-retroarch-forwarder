@@ -5,12 +5,14 @@ the RomFS and keep config, saves, states, core options and screenshots in
 the manifest's data_dir (one flat folder per game) instead of
 sdmc:/retroarch. The core info folder points at the RomFS (nothing to parse
 at startup) and the bottom screen assets come from the RomFS when present.
-Stock behaviour is unchanged for CIAs without that file.
+Once the content is loaded, a bezel.png from data_dir (or the RomFS) is
+shown as a full screen overlay. Stock behaviour is unchanged for CIAs
+without that file.
 
 Applies to RetroArch v1.22.2 (RETROARCH_REF in versions.env).
 
 diff --git a/frontend/drivers/platform_ctr.c b/frontend/drivers/platform_ctr.c
-index ef1459e8..0384b3bb 100644
+index ef1459e8..b38ea588 100644
 --- a/frontend/drivers/platform_ctr.c
 +++ b/frontend/drivers/platform_ctr.c
 @@ -16,6 +16,7 @@
@@ -30,7 +32,16 @@ index ef1459e8..0384b3bb 100644
  #include <string/stdstring.h>
  
  #ifdef HAVE_CONFIG_H
-@@ -95,6 +98,123 @@ static void get_first_valid_core(char* path_return, size_t len)
+@@ -45,6 +48,8 @@
+ #include "../../defaults.h"
+ #include "../../paths.h"
+ #include "../../retroarch.h"
++#include "../../configuration.h"
++#include "../../command.h"
+ #include "../../verbosity.h"
+ 
+ #include "ctr/ctr_debug.h"
+@@ -95,6 +100,180 @@ static void get_first_valid_core(char* path_return, size_t len)
  }
  #endif
  
@@ -48,14 +59,27 @@ index ef1459e8..0384b3bb 100644
 + *   game.<ext>        the content
 + *   retroarch.cfg     seeds data_dir/retroarch.cfg on first boot
 + *   bottom_menu.png   touch screen menu asset, optional
++ *   bezel.png         top screen bezel, optional (+ bezel.cfg, its overlay)
++ *
++ * A bezel.png in data_dir replaces the RomFS one; its overlay file
++ * (data_dir/bezel.cfg) is written next to it when missing.
 + */
 +#define CTR_INJECTED_ROOT     "romfs:/"
 +#define CTR_INJECTED_MANIFEST CTR_INJECTED_ROOT "manifest.cfg"
 +#define CTR_INJECTED_BASE_CFG CTR_INJECTED_ROOT "retroarch.cfg"
 +#define CTR_INJECTED_BOTTOM   CTR_INJECTED_ROOT "bottom_menu.png"
++#define CTR_BEZEL_IMAGE       "bezel.png"
++#define CTR_BEZEL_OVERLAY     "bezel.cfg"
++#define CTR_BEZEL_OVERLAY_CFG \
++   "overlays = 1\n" \
++   "overlay0_overlay = \"" CTR_BEZEL_IMAGE "\"\n" \
++   "overlay0_full_screen = true\n" \
++   "overlay0_descs = 0\n"
 +
 +static bool ctr_romfs_mounted = false;
++static bool ctr_injected      = false;
 +static char ctr_injected_content[PATH_MAX_LENGTH];
++static char ctr_injected_data_dir[PATH_MAX_LENGTH];
 +
 +static void ctr_injected_set_dir(enum default_dirs type, const char *dir)
 +{
@@ -135,6 +159,8 @@ index ef1459e8..0384b3bb 100644
 +
 +   fill_pathname_join(ctr_injected_content, CTR_INJECTED_ROOT, content,
 +         sizeof(ctr_injected_content));
++   strlcpy(ctr_injected_data_dir, data_dir, sizeof(ctr_injected_data_dir));
++   ctr_injected = true;
 +
 +   if (params)
 +   {
@@ -151,10 +177,52 @@ index ef1459e8..0384b3bb 100644
 +}
 +#endif
 +
++#ifndef IS_SALAMANDER
++/* The overlay file of the bezel to show, or "" for none. */
++static void ctr_injected_bezel_overlay(char *s, size_t len)
++{
++   char image[PATH_MAX_LENGTH];
++
++   s[0] = '\0';
++   fill_pathname_join(image, ctr_injected_data_dir, CTR_BEZEL_IMAGE, sizeof(image));
++   if (path_is_valid(image))
++   {
++      fill_pathname_join(s, ctr_injected_data_dir, CTR_BEZEL_OVERLAY, len);
++      if (!path_is_valid(s))
++         filestream_write_file(s, CTR_BEZEL_OVERLAY_CFG,
++               (int64_t)strlen(CTR_BEZEL_OVERLAY_CFG));
++   }
++   else if (path_is_valid(CTR_INJECTED_ROOT CTR_BEZEL_IMAGE))
++      strlcpy(s, CTR_INJECTED_ROOT CTR_BEZEL_OVERLAY, len);
++}
++
++/* Runs once the content is loaded (settings and video are up): shows the
++ * game's bezel as a full screen overlay, or turns overlays off. */
++static void frontend_ctr_process_args(int *argc, char *argv[])
++{
++   char overlay[PATH_MAX_LENGTH];
++   settings_t *settings = config_get_ptr();
++
++   if (!ctr_injected || !settings)
++      return;
++
++   ctr_injected_bezel_overlay(overlay, sizeof(overlay));
++   if (string_is_empty(overlay))
++   {
++      configuration_set_bool(settings, settings->bools.input_overlay_enable, false);
++      command_event(CMD_EVENT_OVERLAY_UNLOAD, NULL);
++      return;
++   }
++   configuration_set_string(settings, settings->paths.path_overlay, overlay);
++   configuration_set_bool(settings, settings->bools.input_overlay_enable, true);
++   command_event(CMD_EVENT_OVERLAY_INIT, NULL);
++}
++#endif
++
  static void frontend_ctr_get_env(int* argc, char* argv[],
        void* args, void* params_data)
  {
-@@ -138,6 +258,12 @@ static void frontend_ctr_get_env(int* argc, char* argv[],
+@@ -138,6 +317,12 @@ static void frontend_ctr_get_env(int* argc, char* argv[],
                        "ctr", sizeof(g_defaults.dirs[DEFAULT_DIR_BOTTOM_ASSETS]));
  
  #ifndef IS_SALAMANDER
@@ -167,7 +235,7 @@ index ef1459e8..0384b3bb 100644
     dir_check_defaults("custom.ini");
  #endif
  }
-@@ -188,6 +314,12 @@ static void frontend_ctr_deinit(void* data)
+@@ -188,6 +373,12 @@ static void frontend_ctr_deinit(void* data)
     gfxTopRightFramebuffers[0] = NULL;
     gfxTopRightFramebuffers[1] = NULL;
     gfxExit();
@@ -180,3 +248,15 @@ index ef1459e8..0384b3bb 100644
  #endif
  }
  
+@@ -632,7 +823,11 @@ frontend_ctx_driver_t frontend_ctx_ctr =
+    frontend_ctr_init,            /* init                           */
+    frontend_ctr_deinit,          /* deinit                         */
+    frontend_ctr_exitspawn,       /* exitspawn                      */
++#ifdef IS_SALAMANDER
+    NULL,                         /* process_args                   */
++#else
++   frontend_ctr_process_args,    /* process_args                   */
++#endif
+    frontend_ctr_exec,            /* exec                           */
+ #ifdef IS_SALAMANDER
+    NULL,                         /* set_fork                       */

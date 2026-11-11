@@ -1,8 +1,8 @@
 """Bring icon, banner and jingle to the exact spec ``bannertool`` expects.
 
 * Images (any size, any format Pillow reads) are **stretched**, never
-  cropped, to 48x48 (icon) and 256x128 (banner). A platform frame, if any,
-  is drawn over the resized banner.
+  cropped, to 48x48 (icon), 256x128 (banner) and 400x240 (bezel, the top
+  screen). A platform frame, if any, is drawn over the resized banner.
 * Audio becomes a 16-bit PCM, 44.1 kHz, stereo WAV of at most 3 seconds.
   A 16-bit PCM WAV (every catalog jingle) is converted in pure Python;
   any other format is handed to ``ffmpeg``, which is then required.
@@ -32,6 +32,8 @@ from forwarder3ds.ctr.formats import (
 )
 
 _RESAMPLE = Image.Resampling.BICUBIC
+#: The 3DS top screen; the bezel covers it whole.
+BEZEL_WIDTH, BEZEL_HEIGHT = 400, 240
 
 
 def _open_image(src: Path) -> Image.Image:
@@ -65,6 +67,15 @@ def prepare_banner_image(src: Path, dst: Path, overlay: Path | None = None) -> N
             frame = frame.resize(banner.size, _RESAMPLE)
         banner.alpha_composite(frame)
     banner.save(dst, format="PNG")
+
+
+def prepare_bezel(src: Path, dst: Path) -> None:
+    """Resize ``src`` into a 400x240 PNG at ``dst``, keeping its transparency.
+
+    The game shows through the transparent part: a 4:3 picture is 320x240 in
+    the middle of the screen, leaving 40-pixel bands on each side.
+    """
+    resize_image_stretch(src, dst, BEZEL_WIDTH, BEZEL_HEIGHT)
 
 
 # ── Audio ────────────────────────────────────────────────────────────────

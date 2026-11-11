@@ -9,6 +9,7 @@ import stat
 from pathlib import Path
 
 import pytest
+from PIL import Image
 
 from forwarder3ds.builder.errors import BuildError
 from forwarder3ds.builder.injector import (
@@ -17,8 +18,9 @@ from forwarder3ds.builder.injector import (
     make_request,
     manifest_text,
     seed_config_text,
+    write_romfs,
 )
-from forwarder3ds.builder.toolchain import find_toolchain
+from forwarder3ds.builder.toolchain import Base, find_toolchain
 from forwarder3ds.core import paths
 from forwarder3ds.core.names import save_folder_name, suggest_title
 from forwarder3ds.core.settings import Settings, load_settings, masked, save_settings
@@ -64,6 +66,20 @@ def test_request_defaults_and_romfs_files(tmp_path: Path) -> None:
     assert 'data_dir = "sdmc:/saves/gb/Tetris"' in manifest
     assert 'rom_name = "Tetris (World) (Rev 1).GB"' in manifest
     assert 'core_options_path = "sdmc:/saves/gb/Tetris/game.opt"' in seed_config_text(request)
+
+
+def test_bezel_goes_in_the_romfs(tmp_path: Path) -> None:
+    rom = tmp_path / "Tetris.gb"
+    rom.write_bytes(b"\0")
+    image = tmp_path / "frame.png"
+    Image.new("RGBA", (800, 480), (0, 0, 0, 0)).save(image)
+    request = make_request(rom=rom, long_name="Tetris", output=tmp_path / "t.cia", bezel=image)
+    base = Base("gambatte", tmp_path / "x.elf", "64MB", "Legacy", False, None, {})
+    romfs = write_romfs(tmp_path / "scratch", request, base)
+    with Image.open(romfs / "bezel.png") as bezel:
+        assert bezel.size == (400, 240) and bezel.mode == "RGBA"
+    assert 'overlay0_overlay = "bezel.png"' in (romfs / "bezel.cfg").read_text(encoding="utf-8")
+    assert (romfs / "game.gb").read_bytes() == b"\0"
     with pytest.raises(BuildError):
         make_request(rom=tmp_path / "disc.chd", long_name="Disc", output=tmp_path / "d.cia")
 
