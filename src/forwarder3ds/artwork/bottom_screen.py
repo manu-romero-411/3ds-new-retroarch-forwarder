@@ -72,15 +72,15 @@ _MESSAGE_COLOUR = (88, 88, 88, 255)
 _FOOTER_COLOUR = (80, 80, 80, 255)
 _SUPERSAMPLE = 4
 
-# The HOME icon (switch_home_button.svg, 8.4667 units wide): a house with a
-# square window, drawn as its outline minus the window.
-_HOUSE_UNITS = 8.4666665
+# The HOME icon (data/bottom_screen/home_icon.svg, 16 units square), as on
+# the Virtual Console: a wide roof over a house with a window under it. Both
+# outlines are stroked with round joins, which rounds the corners.
+_HOUSE_UNITS = 16
+_HOUSE_STROKE = 1.2
 _HOUSE = (
-    (4.2333334, 1.3137626), (1.0583333, 3.9779039), (2.1166668, 3.9779039),
-    (2.1166668, 7.152904), (6.3499998, 7.152904), (6.3499998, 3.9779039),
-    (7.4083332, 3.9779039),
+    (8, 2), (1.5, 8), (1.5, 9), (3, 9), (3, 14), (13, 14), (13, 9), (14.5, 9), (14.5, 8),
 )  # fmt: skip
-_WINDOW = ((3.1749999, 3.9779039), (5.2916666, 6.0945704))
+_WINDOW = ((5.5, 9), (5.5, 13), (10.5, 13), (10.5, 9))
 
 Font = ImageFont.FreeTypeFont | ImageFont.ImageFont
 
@@ -133,15 +133,26 @@ def _cap_height(font: Font) -> int:
     return int(box[3] - box[1])
 
 
+def _outline(draw: ImageDraw.ImageDraw, points: list[tuple[float, float]], width: float) -> None:
+    """Stroke the closed polygon ``points`` with round joins."""
+    radius = width / 2
+    for index, (x, y) in enumerate(points):
+        draw.line((x, y, *points[index - 1]), fill=255, width=round(width))
+        draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=255)
+
+
 def house_icon(size: int, colour: tuple[int, int, int, int]) -> Image.Image:
     """The HOME icon, ``size`` pixels square, antialiased."""
     big = size * _SUPERSAMPLE
     scale = big / _HOUSE_UNITS
+    house = [(x * scale, y * scale) for x, y in _HOUSE]
+    window = [(x * scale, y * scale) for x, y in _WINDOW]
     mask = Image.new("L", (big, big), 0)
     draw = ImageDraw.Draw(mask)
-    draw.polygon([(x * scale, y * scale) for x, y in _HOUSE], fill=255)
-    (left, top), (right, bottom) = _WINDOW
-    draw.rectangle((left * scale, top * scale, right * scale, bottom * scale), fill=0)
+    draw.polygon(house, fill=255)
+    _outline(draw, house, _HOUSE_STROKE * scale)
+    draw.polygon(window, fill=0)
+    _outline(draw, window, _HOUSE_STROKE * scale)
     icon = Image.new("RGBA", (size, size), colour)
     icon.putalpha(mask.resize((size, size), Image.Resampling.LANCZOS))
     return icon
@@ -159,12 +170,12 @@ def _draw_message(image: Image.Image, text: str, font: Font) -> None:
 
 def _draw_footer(image: Image.Image, text: str, font: Font) -> None:
     cap = _cap_height(font)
-    icon_size = cap + 4
+    icon_size = cap + 3
     width = icon_size + _ICON_GAP + font.getlength(text)
     left = round((WIDTH - width) / 2)
     baseline = _FOOTER_CAP_TOP + cap
     icon = house_icon(icon_size, _FOOTER_COLOUR)
-    image.alpha_composite(icon, (left, baseline - icon_size + 2))
+    image.alpha_composite(icon, (left, baseline - icon_size + 1))
     ImageDraw.Draw(image).text(
         (left + icon_size + _ICON_GAP, baseline), text, font=font, fill=_FOOTER_COLOUR, anchor="ls"
     )
