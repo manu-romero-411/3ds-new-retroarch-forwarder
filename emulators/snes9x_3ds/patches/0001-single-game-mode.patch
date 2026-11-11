@@ -181,10 +181,10 @@ index b4ae407..aa1c784 100644
      memset(settings3DS.lastSelectedDir, 0, sizeof(settings3DS.lastSelectedDir));
 diff --git a/source/3dssinglegame.cpp b/source/3dssinglegame.cpp
 new file mode 100644
-index 0000000..7352bb8
+index 0000000..756aa90
 --- /dev/null
 +++ b/source/3dssinglegame.cpp
-@@ -0,0 +1,115 @@
+@@ -0,0 +1,116 @@
 +#include <cstdio>
 +#include <cstring>
 +#include <sys/stat.h>
@@ -262,10 +262,11 @@ index 0000000..7352bb8
 +    fclose(fp);
 +
 +    // "game.sfc" is relative to the RomFS root
-+    if (romPath[0] != '\0' && !strchr(romPath, ':')) {
-+        char relative[PATH_MAX];
-+        snprintf(relative, sizeof(relative), "%s", romPath);
-+        snprintf(romPath, sizeof(romPath), "romfs:/%s", relative);
++    static const char romfsRoot[] = "romfs:/";
++    size_t len = strlen(romPath);
++    if (len > 0 && !strchr(romPath, ':') && len + sizeof(romfsRoot) <= sizeof(romPath)) {
++        memmove(romPath + sizeof(romfsRoot) - 1, romPath, len + 1);
++        memcpy(romPath, romfsRoot, sizeof(romfsRoot) - 1);
 +    }
 +
 +    active = romPath[0] != '\0' && dataDir[0] != '\0';
