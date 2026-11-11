@@ -35,6 +35,13 @@ RetroArch installed and never touches `sdmc:/retroarch`.
   fill the CIA's names, and libretro's title screen and snapshot can be
   used as the banner background. Hacks, translations or other revisions are
   flagged and can be matched by hand.
+- **SNES games can also run on [snes9x_3ds](https://github.com/matbo87/snes9x_3ds)**
+  (matbo87's fork, faster with Super FX and SA-1 games) instead of
+  RetroArch: pick `snes9x_3ds` as the project's core. It is patched
+  (`emulators/snes9x_3ds/`) to boot straight into the game and keep its
+  files flat in the same save folder (`game.srm`, `game.auto.frz`,
+  `game.cfg`, `settings.cfg`); its own menu replaces RetroArch's, so the
+  injection options (screen, controls, core options, bezel) do not apply.
 - ROMs can stay zipped, as No-Intro sets come: the zip's ROM is identified
   by the CRC the zip stores and packed uncompressed into the CIA.
 - Artwork comes from **SteamGridDB** (icon, hero and logo; the banner is the
@@ -184,7 +191,7 @@ registry file to keep the guarantee across them.
 ```bash
 pip install -e '.[gui,dev]'
 packaging/toolchain/build-tools.sh toolchain   # makerom + bannertool for this machine
-packaging/toolchain/build-base.sh toolchain all  # RetroArch bases (devkitARM via docker/podman)
+packaging/toolchain/build-base.sh toolchain all  # bases (devkitARM via docker/podman)
 3ds-forwarder doctor
 pylint src/forwarder3ds tests scripts packaging/targets.py
 QT_QPA_PLATFORM=offscreen pytest

@@ -305,8 +305,15 @@ def seed_config_text(request: GameRequest) -> str:
 
 
 def write_romfs(directory: Path, request: GameRequest, base: Base) -> Path:
-    """Lay out the CIA's RomFS in ``directory/romfs`` and return that folder."""
+    """Lay out the CIA's RomFS in ``directory/romfs`` and return that folder.
+
+    A standalone emulator gets its own RomFS files, the ROM and the manifest
+    only: RetroArch's settings (screen, controls, core options, bezel) do
+    not apply to it.
+    """
     romfs = directory / "romfs"
+    if base.standalone and base.romfs is not None:
+        shutil.copytree(base.romfs, romfs, dirs_exist_ok=True)
     romfs.mkdir(parents=True, exist_ok=True)
     try:
         if is_archive(request.rom):  # pack the ROM itself: nothing to extract on the console
@@ -317,6 +324,12 @@ def write_romfs(directory: Path, request: GameRequest, base: Base) -> Path:
     except (OSError, ArchiveError, SystemCatalogError) as exc:
         raise BuildError(f"Cannot read {request.rom}: {exc}") from exc
     (romfs / MANIFEST_FILE).write_text(manifest_text(request), encoding="utf-8")
+    if base.standalone:
+        if request.bezel or request.core_options or request.remap:
+            _log.info(
+                "%s has its own settings: bezel, controls and core options skipped", base.core
+            )
+        return romfs
     (romfs / SEED_CONFIG_FILE).write_text(seed_config_text(request), encoding="utf-8")
     shutil.copyfile(bundled(MENU_THEME_FILE), romfs / MENU_THEME_FILE)
     if base.bottom_menu is not None:
@@ -376,7 +389,7 @@ def _make_cia(  # pylint: disable=too-many-arguments,too-many-positional-argumen
     run_tool(
         [
             str(tools.makerom), "-f", "cia", "-target", "t", "-exefslogo",
-            "-o", str(out), "-elf", str(base.elf), "-rsf", str(tools.rsf),
+            "-o", str(out), "-elf", str(base.elf), "-rsf", str(base.rsf or tools.rsf),
             "-icon", str(icon_icn), "-banner", str(banner_bnr),
             f"-DAPP_TITLE={title}",
             f"-DAPP_PRODUCT_CODE=CTR-I-{unique_id & 0xFFFF:04X}",
@@ -385,6 +398,7 @@ def _make_cia(  # pylint: disable=too-many-arguments,too-many-positional-argumen
             f"-DAPP_SYSTEM_MODE_EXT={base.system_mode_ext}",
             "-DAPP_ENCRYPTED=false",
             f"-DROMFS_DIR={romfs}",
+            f"-DAPP_ROMFS={romfs}",  # the name standalone emulators' RSFs use
         ],
         "packaging the CIA",
     )  # fmt: skip

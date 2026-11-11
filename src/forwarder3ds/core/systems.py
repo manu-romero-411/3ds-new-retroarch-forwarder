@@ -1,4 +1,4 @@
-"""The consoles a game can be injected for, and the core each one uses.
+"""The consoles a game can be injected for, and the emulators that run them.
 
 The catalog is ``forwarder3ds/data/systems.json``. Console identifiers are
 Batocera's ROM folder names (``gb``, ``snes``, ``megadrive``...): they also
@@ -9,6 +9,10 @@ PlayStation), so every game is exactly one file in the CIA.
 Each system also names its libretro database (``libretro``, e.g.
 ``Nintendo - Game Boy``) and whether its games are identified against a
 No-Intro dat (cartridges, by CRC) or a Redump one (discs, by name).
+
+``core`` is the console's default RetroArch core; ``alternatives`` lists
+other bases that can run it (another core, or a standalone emulator such
+as ``snes9x_3ds``).
 """
 
 from __future__ import annotations
@@ -38,6 +42,13 @@ class System:
     extensions: tuple[str, ...]
     libretro: str = ""
     database: str = "no-intro"
+    #: Other emulators that can run this console's games (``core`` is the default).
+    alternatives: tuple[str, ...] = ()
+
+    @property
+    def cores(self) -> tuple[str, ...]:
+        """Every emulator for this console, the default first."""
+        return (self.core, *self.alternatives)
 
     @property
     def is_disc(self) -> bool:
@@ -75,6 +86,7 @@ class SystemCatalog:
                     extensions=tuple(ext.lower() for ext in data["extensions"]),
                     libretro=data.get("libretro", ""),
                     database=data.get("database", "no-intro"),
+                    alternatives=tuple(data.get("alternatives", ())),
                 )
                 for console, data in raw.items()
             }

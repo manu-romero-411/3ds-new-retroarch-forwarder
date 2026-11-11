@@ -60,6 +60,8 @@ class GameContext:
     console_name: str
     core: str
     core_options: CoreOptions | None
+    #: A standalone emulator: it has its own settings menu, none of these apply.
+    standalone: bool = False
 
 
 class InjectionOptionsDialog(QDialog):  # pylint: disable=too-many-instance-attributes
@@ -113,8 +115,22 @@ class InjectionOptionsDialog(QDialog):  # pylint: disable=too-many-instance-attr
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout = QVBoxLayout(self)
-        layout.addWidget(self._build_screen_group())
-        layout.addWidget(self._build_retroarch_group())
+        screen_group = self._build_screen_group()
+        retroarch_group = self._build_retroarch_group()
+        if game.standalone:
+            note = QLabel(
+                self.tr(
+                    "{core} is a standalone emulator with its own settings (screen, controls, "
+                    "bezels…): set them in its menu on the console. The options below only "
+                    "apply to RetroArch."
+                ).format(core=game.core)
+            )
+            note.setWordWrap(True)
+            layout.addWidget(note)
+            screen_group.setEnabled(False)
+            retroarch_group.setEnabled(False)
+        layout.addWidget(screen_group)
+        layout.addWidget(retroarch_group)
         layout.addWidget(buttons)
 
     def _build_screen_group(self) -> QGroupBox:

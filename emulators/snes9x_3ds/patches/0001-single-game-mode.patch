@@ -1,0 +1,321 @@
+snes9x_3ds: single-game mode for injected CIAs
+
+A CIA made by 3ds-forwarder carries one ROM in its RomFS plus
+romfs:/manifest.cfg (content = "game.sfc", data_dir =
+"sdmc:/saves/snes/<game>"). When the manifest is there the emulator:
+
+- uses data_dir as its root directory, and keeps saves, savestates,
+  configs, screenshots and cheats flat in it (game.srm, game.auto.frz,
+  game.cfg, ...), next to the global settings.cfg;
+- loads the ROM and resumes the auto savestate at boot;
+- leaves out the "Games" tab (ROM browser) and the online updater.
+
+Without a manifest nothing changes. Applies to matbo87/snes9x_3ds v2.0.
+
+diff --git a/source/3dsfiles.cpp b/source/3dsfiles.cpp
+index 5e576f0..1696fe0 100644
+--- a/source/3dsfiles.cpp
++++ b/source/3dsfiles.cpp
+@@ -11,6 +11,7 @@
+ #include "3dslog.h"
+ #include "3dssettings.h"
+ #include "3dsfiles.h"
++#include "3dssinglegame.h"
+ 
+ enum class DirCacheStatus {
+     Success,
+@@ -120,6 +121,8 @@ bool file3dsInitialize() {
+     char reqDir[128];
+ 
+     for (const char* dir : directories) {
++        // a single game keeps its files flat in its own folder
++        if (singleGameActive() && dir[0] != '\0') continue;
+         if (dir[0] == '\0') {
+              snprintf(reqDir, sizeof(reqDir), "%s", settings3DS.RootDir);
+         } else {
+@@ -626,7 +629,11 @@ void file3dsGetRelatedPath(const char* path, char* output, size_t bufferSize, co
+ 
+     const char* extension = (ext) ? ext : "";
+ 
+-    if (targetDir) {
++    if (singleGameFlattens(targetDir)) {
++        // (e.g. sdmc:/saves/snes/Super Mario World/game.srm)
++        snprintf(output, bufferSize, "%s/%s%s", settings3DS.RootDir, basename, extension);
++    }
++    else if (targetDir) {
+         // (e.g. sdmc:/3ds/snes9x_3ds/backgrounds/game_screen/Super Mario World.png)
+         snprintf(output, bufferSize, "%s/%s/%s%s", settings3DS.RootDir, targetDir, basename, extension);
+     } 
+diff --git a/source/3dsmain.cpp b/source/3dsmain.cpp
+index 59a42d9..84b9730 100644
+--- a/source/3dsmain.cpp
++++ b/source/3dsmain.cpp
+@@ -38,6 +38,7 @@
+ #include "3dshttp.h"
+ #include "3dsupdater.h"
+ #include "3dsupdater_ui.h"
++#include "3dssinglegame.h"
+ 
+ inline std::string operator "" _s(const char* s, size_t length) {
+     return std::string(s, length);
+@@ -557,8 +558,9 @@ void makeEmulatorMenu(std::vector<SMenuItem>& items, std::vector<SMenuTab>& menu
+         items.emplace_back(nullptr, MenuItemType::Action, "  Save and Load", "\233",
+                            MENU_ENTER_SUBPAGE - SUBPAGE_SAVE_LOAD);
+ 
+-        items.emplace_back(nullptr, MenuItemType::Action, "  Online Updater", "\233",
+-                           MENU_ENTER_SUBPAGE - SUBPAGE_ONLINE_UPDATER);
++        if (!singleGameActive())
++            items.emplace_back(nullptr, MenuItemType::Action, "  Online Updater", "\233",
++                               MENU_ENTER_SUBPAGE - SUBPAGE_ONLINE_UPDATER);
+ 
+         AddMenuSpacer(items);
+ 
+@@ -694,7 +696,7 @@ void makeEmulatorMenu(std::vector<SMenuItem>& items, std::vector<SMenuTab>& menu
+     AddMenuNote(items, logfileInfo);
+     AddMenuSpacer(items);
+ 
+-    if (!session3DS.isRomLoaded)
++    if (!session3DS.isRomLoaded && !singleGameActive())
+         items.emplace_back(nullptr, MenuItemType::Action, "  Online Updater", "\233",
+                            MENU_ENTER_SUBPAGE - SUBPAGE_ONLINE_UPDATER);
+ 
+@@ -1718,7 +1720,10 @@ bool emulatorLoadRom()
+     settingsSave(session3DS.isRomLoaded);
+ 
+     char romFileNameFullPath[PATH_MAX];
+-    snprintf(romFileNameFullPath, sizeof(romFileNameFullPath), "%s%s", file3dsGetCurrentDir(), romFileName);
++    if (singleGameActive())
++        snprintf(romFileNameFullPath, sizeof(romFileNameFullPath), "%s", singleGameRomPath());
++    else
++        snprintf(romFileNameFullPath, sizeof(romFileNameFullPath), "%s%s", file3dsGetCurrentDir(), romFileName);
+ 
+     // when impl3dsLoadROM fails, our previous game (if any) is also unusable
+     // therefore we always set ROMCRC32 to 0
+@@ -1918,6 +1923,11 @@ static void restoreMenuSelection(SMenuTab& tab, bool preserveSelection) {
+ void setupMenu(int& currentMenuTab) {
+     int requiredTabs = session3DS.isRomLoaded ? 5 : 2;
+     int fileMenuTabIndex = session3DS.isRomLoaded ? 4 : 1;
++    if (singleGameActive()) {
++        // no ROM browser: the "Games" tab is left out
++        requiredTabs--;
++        fileMenuTabIndex = -1;
++    }
+     bool isFirstRun = menuTabs.empty();
+     bool requiredTabsChanged = menuTabs.size() != static_cast<size_t>(requiredTabs);
+     bool romChanged = !isFirstRun && Memory.ROMCRC32 != lastLoadedRomCRC;
+@@ -2404,7 +2414,7 @@ void showMenu() {
+                 showAchievementsOptions(dialogTab, isDialog, currentMenuTab);
+             else if (currentMenuTab == TAB_CHEATS)
+                 showCheatsOptions(dialogTab, isDialog, currentMenuTab);
+-            else
++            else if (!singleGameActive())
+                 showFileMenuOptions(dialogTab, isDialog, currentMenuTab);
+         }
+ 
+@@ -2500,7 +2510,8 @@ bool emulatorInitialize()
+     ui3dsPrepare();
+     menu3dsShowSplashMessage("Loading");
+ 
+-    Result rc = romfsInit();
++    // singleGameInit() may have mounted it already
++    Result rc = session3DS.isRomFsLoaded ? 0 : romfsInit();
+     session3DS.isRomFsLoaded = !R_FAILED(rc);
+ 
+     if (session3DS.isRomFsLoaded) {
+@@ -2796,6 +2807,7 @@ void emulatorLoop()
+ //---------------------------------------------------------
+ int main(int argc, char **argv)
+ {
++    singleGameInit();
+     updaterSetExecutablePath(argc > 0 ? argv[0] : NULL);
+     osSetSpeedupEnable(true);
+     utils3dsInitialize();
+@@ -2818,7 +2830,15 @@ int main(int argc, char **argv)
+     gfxSetDoubleBuffering(settings3DS.SecondScreen, true);
+ 
+     session3DS.emulatorState = EMUSTATE_PAUSEMENU;
+-    updater3dsStartAutoCheck();
++    if (!singleGameActive()) {
++        updater3dsStartAutoCheck();
++    } else if (emulatorLoadRom()) {
++        // boot straight into the game, where it was left
++        sav3dsLoadAuto();
++        menu3dsSetLastSelectedTabIndex(0);
++        impl3dsUpdateUiAssets();
++        session3DS.emulatorState = EMUSTATE_EMULATE;
++    }
+     
+     while (aptMainLoop() && session3DS.emulatorState != EMUSTATE_END) {
+         switch (session3DS.emulatorState) {
+diff --git a/source/3dssettings.cpp b/source/3dssettings.cpp
+index b4ae407..aa1c784 100644
+--- a/source/3dssettings.cpp
++++ b/source/3dssettings.cpp
+@@ -8,11 +8,12 @@
+ #include "3dslcd.h"
+ #include "3dsui.h"
+ #include "3dsutils.h"
++#include "3dssinglegame.h"
+ 
+ S9xSettings3DS settings3DS;
+ 
+ void settings3dsResetGlobalDefaults() {
+-    settings3DS.RootDir = "sdmc:/3ds/snes9x_3ds";
++    settings3DS.RootDir = singleGameActive() ? singleGameDataDir() : "sdmc:/3ds/snes9x_3ds";
+     
+     memset(settings3DS.defaultDir, 0, sizeof(settings3DS.defaultDir));
+     memset(settings3DS.lastSelectedDir, 0, sizeof(settings3DS.lastSelectedDir));
+diff --git a/source/3dssinglegame.cpp b/source/3dssinglegame.cpp
+new file mode 100644
+index 0000000..7352bb8
+--- /dev/null
++++ b/source/3dssinglegame.cpp
+@@ -0,0 +1,115 @@
++#include <cstdio>
++#include <cstring>
++#include <sys/stat.h>
++#include <unistd.h>
++#include <dirent.h>
++
++#include <3ds.h>
++
++#include "3dsutils.h"
++#include "3dssettings.h"
++#include "3dsfiles.h"
++#include "3dssinglegame.h"
++
++#define SINGLE_GAME_MANIFEST "romfs:/manifest.cfg"
++
++// manifest.cfg, as 3ds-forwarder writes it:
++//   content = "game.sfc"                        (relative to the RomFS root)
++//   data_dir = "sdmc:/saves/snes/<game>"
++
++static bool active = false;
++static char romPath[PATH_MAX];
++static char dataDir[PATH_MAX];
++
++// Reads `key = "value"` into value; returns false for other lines.
++static bool parseLine(const char *line, const char *key, char *value, size_t size)
++{
++    size_t keyLen = strlen(key);
++    while (*line == ' ' || *line == '\t') line++;
++    if (strncmp(line, key, keyLen) != 0) return false;
++    line += keyLen;
++    while (*line == ' ' || *line == '\t') line++;
++    if (*line++ != '=') return false;
++    const char *start = strchr(line, '"');
++    if (!start) return false;
++    const char *end = strrchr(start + 1, '"');
++    if (!end || end == start + 1) return false;
++    size_t len = (size_t)(end - start - 1);
++    if (len >= size) return false;
++    memcpy(value, start + 1, len);
++    value[len] = '\0';
++    return true;
++}
++
++// mkdir -p for "sdmc:/a/b/c".
++static void makeDirs(const char *path)
++{
++    char partial[PATH_MAX];
++    snprintf(partial, sizeof(partial), "%s", path);
++    char *slash = strchr(partial, '/');
++    while (slash && (slash = strchr(slash + 1, '/'))) {
++        *slash = '\0';
++        mkdir(partial, 0777);
++        *slash = '/';
++    }
++    mkdir(partial, 0777);
++}
++
++bool singleGameInit()
++{
++    if (R_FAILED(romfsInit()))
++        return false;
++    session3DS.isRomFsLoaded = true;
++
++    FILE *fp = fopen(SINGLE_GAME_MANIFEST, "r");
++    if (!fp)
++        return false;
++
++    char line[PATH_MAX + 64];
++    romPath[0] = dataDir[0] = '\0';
++    while (fgets(line, sizeof(line), fp)) {
++        line[strcspn(line, "\r\n")] = '\0';
++        if (!parseLine(line, "content", romPath, sizeof(romPath)))
++            parseLine(line, "data_dir", dataDir, sizeof(dataDir));
++    }
++    fclose(fp);
++
++    // "game.sfc" is relative to the RomFS root
++    if (romPath[0] != '\0' && !strchr(romPath, ':')) {
++        char relative[PATH_MAX];
++        snprintf(relative, sizeof(relative), "%s", romPath);
++        snprintf(romPath, sizeof(romPath), "romfs:/%s", relative);
++    }
++
++    active = romPath[0] != '\0' && dataDir[0] != '\0';
++    if (active)
++        makeDirs(dataDir);
++    return active;
++}
++
++bool singleGameActive()
++{
++    return active;
++}
++
++const char *singleGameRomPath()
++{
++    return romPath;
++}
++
++const char *singleGameDataDir()
++{
++    return dataDir;
++}
++
++bool singleGameFlattens(const char *targetDir)
++{
++    static const char *flat[] = { "saves", "savestates", "configs", "screenshots", CHEATS_DIR };
++    if (!active || !targetDir)
++        return false;
++    for (const char *dir : flat) {
++        if (strcmp(targetDir, dir) == 0)
++            return true;
++    }
++    return false;
++}
+diff --git a/source/3dssinglegame.h b/source/3dssinglegame.h
+new file mode 100644
+index 0000000..a94120a
+--- /dev/null
++++ b/source/3dssinglegame.h
+@@ -0,0 +1,27 @@
++#ifndef _3DSSINGLEGAME_H_
++#define _3DSSINGLEGAME_H_
++
++// Single-game mode: a CIA made by 3ds-forwarder carries one ROM in its
++// RomFS and a manifest (romfs:/manifest.cfg) saying where the game keeps
++// its data on the SD card. The emulator then boots straight into that
++// game, keeps saves, states, configs and cheats flat in that folder
++// (sdmc:/saves/snes/<game>/game.srm, ...), and leaves out the ROM browser
++// and the online updater.
++
++// Mounts the RomFS and reads the manifest; call first thing in main().
++// Returns true in a single-game CIA.
++bool singleGameInit();
++
++bool singleGameActive();
++
++// The ROM inside the RomFS, e.g. "romfs:/game.sfc".
++const char *singleGameRomPath();
++
++// The game's folder on the SD card (the emulator's root directory).
++const char *singleGameDataDir();
++
++// Whether files of this kind (a subfolder of the root directory: "saves",
++// "savestates", ...) go straight into the game's folder.
++bool singleGameFlattens(const char *targetDir);
++
++#endif

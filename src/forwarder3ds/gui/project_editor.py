@@ -339,15 +339,7 @@ class ProjectEditor(QScrollArea):  # pylint: disable=too-many-instance-attribute
         self._select(self._console_combo, self._project.console)
         self._console_combo.blockSignals(False)
 
-        available = set(self._context.available_cores())
-        cores = sorted({system.core for system in systems or []} | available)
-        self._core_combo.blockSignals(True)
-        self._core_combo.clear()
-        for core in cores:
-            note = "" if core in available else self.tr(" — no base built")
-            self._core_combo.addItem(core + note, core)
-        self._select(self._core_combo, self._project.core)
-        self._core_combo.blockSignals(False)
+        self._fill_cores()
         self._refresh_title_id()
         self._card_timer.start()
 
@@ -441,14 +433,29 @@ class ProjectEditor(QScrollArea):  # pylint: disable=too-many-instance-attribute
         if edit.text().strip() in ("", old) and new:
             edit.setText(new)
 
+    def _fill_cores(self) -> None:
+        """The emulators for the project's console (the default first)."""
+        system = self._system()
+        available = set(self._context.available_cores())
+        cores = list(system.cores) if system else sorted(available)
+        self._core_combo.blockSignals(True)
+        self._core_combo.clear()
+        for core in cores:
+            note = "" if core in available else self.tr(" — no base built")
+            if self._context.is_standalone(core):
+                note = self.tr(" (standalone)") + note
+            self._core_combo.addItem(core + note, core)
+        self._select(self._core_combo, self._project.core)
+        self._core_combo.blockSignals(False)
+
     def _on_console_changed(self) -> None:
         if self._loading:
             return
-        old_system = self._system()
         self._project.console = str(self._console_combo.currentData() or "")
         system = self._system()
-        if system is not None and self._project.core in ("", old_system.core if old_system else ""):
-            self._select(self._core_combo, system.core)
+        if system is not None and self._project.core not in system.cores:
+            self._project.core = system.core
+        self._fill_cores()
         self._rom_info.set_rom(self._project.rom_path, system, self._project.db_name)
         self._on_edited()
 
@@ -750,6 +757,7 @@ class ProjectEditor(QScrollArea):  # pylint: disable=too-many-instance-attribute
             console_name=system.name if system else project.console,
             core=project.core,
             core_options=self._context.core_options(project.core),
+            standalone=self._context.is_standalone(project.core),
         )
         bezel = project.asset(Asset.BEZEL)
         current = InjectionOptions(

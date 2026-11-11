@@ -32,6 +32,8 @@ from forwarder3ds.core.title_id import (
 )
 
 _log = get_logger("gui")
+#: Standalone emulators with a recipe (``emulators/``), known even before they are built.
+STANDALONE_EMULATORS = frozenset({"snes9x_3ds"})
 
 
 @dataclass
@@ -79,6 +81,15 @@ class AppContext:  # pylint: disable=too-many-instance-attributes
     def available_cores(self) -> list[str]:
         """Cores with a built base."""
         return self.tools.available_cores() if self.tools else []
+
+    def is_standalone(self, core: str) -> bool:
+        """Whether ``core`` is a standalone emulator (RetroArch settings do not apply)."""
+        if self.tools is None or core not in self.available_cores():
+            return core in STANDALONE_EMULATORS
+        try:
+            return self.tools.base(core).standalone
+        except BuildError:
+            return False
 
     def core_options(self, core: str) -> CoreOptions | None:
         """The options of ``core``'s base, or ``None`` if it ships none."""

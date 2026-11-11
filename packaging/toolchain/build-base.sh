@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
-# Build the RetroArch bases: one RetroArch 3DS ELF per core, statically
-# linked and patched with retroarch/patches/ for single-game CIAs.
+# Build the bases: one RetroArch 3DS ELF per core, statically linked and
+# patched with retroarch/patches/ for single-game CIAs, or a standalone
+# emulator patched with emulators/<NAME>/patches/.
 #
-#   packaging/toolchain/build-base.sh OUT_DIR CORE [CORE...]
+#   packaging/toolchain/build-base.sh OUT_DIR NAME [NAME...]
 #   packaging/toolchain/build-base.sh OUT_DIR all
 #
-# CORE is a recipe in retroarch/cores/<CORE>.env. For each one this writes
+# NAME is a core recipe, retroarch/cores/<NAME>.env, or an emulator recipe,
+# emulators/<NAME>/recipe.env. An emulator writes OUT_DIR/bases/<NAME>/
+# app.elf, app.rsf, romfs/, icon.png, banner.png and base.env. A core writes
 #   OUT_DIR/bases/<CORE>/retroarch.elf   patched RetroArch + core
 #   OUT_DIR/bases/<CORE>/base.env        system mode and source revisions
 #   OUT_DIR/bases/<CORE>/{icon,banner}.png, audio.wav   RetroArch's defaults
@@ -25,6 +28,7 @@ readonly HERE REPO_ROOT
 source "${HERE}/versions.env"
 readonly RECIPES_DIR="${REPO_ROOT}/retroarch/cores"
 readonly PATCHES_DIR="${REPO_ROOT}/retroarch/patches"
+readonly EMULATORS_DIR="${REPO_ROOT}/emulators"
 # Current devkitPro ships libctru 2.x, with picasso and bin2s in tools/bin.
 RA_MAKE_FLAGS=(-f Makefile.ctr USE_CTRULIB_2=1)
 # A single-game CIA has no use for networking (netplay, updaters,
@@ -163,6 +167,54 @@ build_core() {
     log "[ OK ]" "Base ready: ${dest}/retroarch.elf"
 }
 
+# Every patch of emulator NAME, concatenated, as a short digest.
+emulator_patches_digest() {
+    cat "${EMULATORS_DIR}/$1/patches"/*.patch 2> /dev/null | sha256sum | cut -c1-12
+}
+
+is_emulator() {
+    [[ -f "${EMULATORS_DIR}/$1/recipe.env" ]]
+}
+
+build_emulator() {
+    local work="$1" name="$2" out_dir="$3" patch jobs
+    local EMU_NAME EMU_REPO EMU_REF EMU_MAKE_ARGS="" EMU_ELF EMU_RSF EMU_ROMFS
+    local EMU_ICON EMU_BANNER APP_SYSTEM_MODE APP_SYSTEM_MODE_EXT EMU_PACKAGES=""
+    # shellcheck source=emulators/snes9x_3ds/recipe.env
+    source "${EMULATORS_DIR}/${name}/recipe.env"
+    local src="${work}/emulators/${EMU_NAME}" dest="${out_dir}/bases/${EMU_NAME}"
+    local -a make_args
+    read -ra make_args <<< "${EMU_MAKE_ARGS}"
+    jobs="$(nproc 2> /dev/null || echo 2)"
+
+    log "[INFO]" "Building ${EMU_NAME} (${EMU_REF})"
+    checkout "${EMU_REPO}" "${EMU_REF}" "${src}"
+    git -C "${src}" submodule update -q --init --depth 1 --recursive
+    for patch in "${EMULATORS_DIR}/${name}/patches"/*.patch; do
+        [[ -e "${patch}" ]] || continue
+        log "[INFO]" "Applying $(basename "${patch}")"
+        git -C "${src}" apply "${patch}"
+    done
+    make -C "${src}" "${make_args[@]}" -j"${jobs}" elf > /dev/null
+
+    rm -rf "${dest}"
+    install -D -m 0644 "${src}/${EMU_ELF}" "${dest}/app.elf"
+    install -m 0644 "${src}/${EMU_RSF}" "${dest}/app.rsf"
+    install -m 0644 "${src}/${EMU_ICON}" "${dest}/icon.png"
+    install -m 0644 "${src}/${EMU_BANNER}" "${dest}/banner.png"
+    cp -r "${src}/${EMU_ROMFS}" "${dest}/romfs"
+    find "${dest}/romfs" -name '*.t3s' -delete
+    {
+        echo "KIND=standalone"
+        echo "CORE_NAME=${EMU_NAME}"
+        echo "CORE_REF=${EMU_REF}"
+        echo "PATCHES=$(emulator_patches_digest "${name}")"
+        echo "APP_SYSTEM_MODE=${APP_SYSTEM_MODE}"
+        echo "APP_SYSTEM_MODE_EXT=${APP_SYSTEM_MODE_EXT}"
+    } > "${dest}/base.env"
+    log "[ OK ]" "Base ready: ${dest}/app.elf"
+}
+
 build_here() {
     local out_dir="$1"
     shift
@@ -172,54 +224,91 @@ build_here() {
     export CTRULIB="${CTRULIB:-${DEVKITPRO:-/opt/devkitpro}/libctru}"
     [[ -d "${CTRULIB}" ]] || die "libctru not found at ${CTRULIB}"
 
-    # Validate every recipe before the long RetroArch checkout.
+    # Validate every recipe before the long checkouts.
+    local -a cores=() emulators=()
     for core in "$@"; do
-        [[ -f "${RECIPES_DIR}/${core}.env" ]] || die "No recipe: retroarch/cores/${core}.env"
+        if is_emulator "${core}"; then
+            emulators+=("${core}")
+        elif [[ -f "${RECIPES_DIR}/${core}.env" ]]; then
+            cores+=("${core}")
+        else
+            die "No recipe: retroarch/cores/${core}.env or emulators/${core}/recipe.env"
+        fi
     done
 
     mkdir -p "${work}"
+    for core in "${emulators[@]}"; do
+        build_emulator "${work}" "${core}" "${out_dir}"
+        record_version "${out_dir}" "${core}" "$(emulator_patches_digest "${core}")"
+    done
+    [[ ${#cores[@]} -gt 0 ]] || return 0
+
     log "[INFO]" "Checking out RetroArch ${RETROARCH_REF}"
     checkout "${RETROARCH_REPO}" "${RETROARCH_REF}" "${work}/RetroArch"
     patch_retroarch "${work}/RetroArch"
     log "[INFO]" "Fetching the 3DS bottom screen assets"
     fetch_file "${RETROARCH_ASSETS_REPO}" "${RETROARCH_ASSETS_REF}" ctr "${work}/retroarch-assets"
 
-    for core in "$@"; do
+    for core in "${cores[@]}"; do
         recipe="${RECIPES_DIR}/${core}.env"
         build_core "${work}" "${recipe}" "${out_dir}"
-        record_version "${out_dir}" "${core}"
+        record_version "${out_dir}" "${core}" "${RETROARCH_REF}+$(patches_digest)"
     done
 }
 
 record_version() {
-    local out_dir="$1" core="$2" versions="$1/VERSIONS"
+    local out_dir="$1" core="$2" version="$3" versions="$1/VERSIONS"
     touch "${versions}"
     grep -v "^base-${core}=" "${versions}" > "${versions}.new" || true
-    echo "base-${core}=${RETROARCH_REF}+$(patches_digest)" >> "${versions}.new"
+    echo "base-${core}=${version}" >> "${versions}.new"
     mv "${versions}.new" "${versions}"
 }
 
+# devkitPro packages the requested emulators link (their EMU_PACKAGES).
+emulator_packages() {
+    local name
+    for name in "$@"; do
+        is_emulator "${name}" || continue
+        # shellcheck disable=SC1090 # recipes are data files
+        (source "${EMULATORS_DIR}/${name}/recipe.env" && echo "${EMU_PACKAGES:-}")
+    done | tr ' ' '\n' | sort -u | tr '\n' ' '
+}
+
 build_in_container() {
-    local out_dir="$1" engine z
+    local out_dir="$1" engine z packages build
     shift
     local -a run user_args
     engine="$(container_engine)" || die "Set DEVKITARM, or install docker or podman"
     read -ra run <<< "${engine}"
     z="$(volume_suffix)"
+    packages="$(emulator_packages "$@")"
+    build="bash /src/packaging/toolchain/build-base.sh /out $(printf '%q ' "$@")"
     user_args=(-u "$(id -u):$(id -g)")
-    # Rootless podman maps the calling user to root inside the container.
-    [[ "${run[-1]}" == podman ]] && user_args=()
+    if [[ "${run[-1]}" == podman ]]; then
+        # Rootless podman maps the calling user to root inside the container.
+        user_args=()
+    elif [[ -n "${packages// /}" ]]; then
+        # Install the packages as root, then build as the calling user.
+        user_args=()
+        build="setpriv --reuid=$(id -u) --regid=$(id -g) --clear-groups ${build}"
+    fi
+    if [[ -n "${packages// /}" ]]; then
+        build="dkp-pacman -Sy --needed --noconfirm ${packages} > /dev/null && ${build}"
+    fi
     log "[INFO]" "Building bases ($*) in ${DEVKITARM_IMAGE} (${engine})"
     "${run[@]}" run --rm "${user_args[@]}" -e HOME=/tmp -e RA_LEAN="${RA_LEAN:-1}" \
         -v "${REPO_ROOT}:/src${z}" -v "${out_dir}:/out${z}" -w /src "${DEVKITARM_IMAGE}" \
-        bash /src/packaging/toolchain/build-base.sh /out "$@"
+        bash -c "${build}"
 }
 
-# Every recipe in retroarch/cores/, by name.
+# Every recipe in retroarch/cores/ and emulators/, by name.
 all_recipes() {
     local recipe
     for recipe in "${RECIPES_DIR}"/*.env; do
         basename "${recipe}" .env
+    done
+    for recipe in "${EMULATORS_DIR}"/*/recipe.env; do
+        [[ -e "${recipe}" ]] && basename "$(dirname "${recipe}")"
     done
 }
 

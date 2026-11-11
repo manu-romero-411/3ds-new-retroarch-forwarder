@@ -23,6 +23,7 @@ from forwarder3ds.core.game_config import (
     remap_text,
 )
 from forwarder3ds.core.projects import Asset, BannerStyle, ProjectStore
+from forwarder3ds.core.systems import SystemCatalog
 
 HEADER = r"""
 #include <libretro.h>
@@ -175,3 +176,32 @@ def test_projects_store(tmp_path: Path) -> None:
 
     store.delete(listed)
     assert not store.list() and rom.exists()
+
+
+def test_standalone_base_romfs(tmp_path: Path) -> None:
+    base_dir = tmp_path / "bases" / "snes9x_3ds"
+    (base_dir / "romfs" / "gfx").mkdir(parents=True)
+    (base_dir / "romfs" / "gfx" / "splash.t3x").write_bytes(b"t3x")
+    (base_dir / "app.elf").write_bytes(b"\x7fELF")
+    (base_dir / "app.rsf").write_text("RomFs:\n  RootPath: $(APP_ROMFS)\n", encoding="utf-8")
+    (base_dir / "base.env").write_text(
+        "KIND=standalone\nCORE_NAME=snes9x_3ds\nAPP_SYSTEM_MODE=64MB\n", encoding="utf-8"
+    )
+    base = Base.load(base_dir)
+    assert base.standalone and base.rsf == base_dir / "app.rsf"
+
+    rom = tmp_path / "Super Mario World (USA).sfc"
+    rom.write_bytes(b"\0" * 16)
+    request = make_request(rom=rom, core="snes9x_3ds", long_name="Super Mario World",
+                           output=tmp_path / "o.cia", remap={"a": "b"})  # fmt: skip
+    romfs = write_romfs(tmp_path / "scratch", request, base)
+    names = sorted(str(path.relative_to(romfs)) for path in romfs.rglob("*") if path.is_file())
+    assert names == ["game.sfc", "gfx/splash.t3x", "manifest.cfg"]
+    manifest = (romfs / "manifest.cfg").read_text(encoding="utf-8")
+    assert 'content = "game.sfc"' in manifest
+    assert 'data_dir = "sdmc:/saves/snes/Super Mario World"' in manifest
+
+
+def test_snes_alternatives() -> None:
+    snes = SystemCatalog.load().require("snes")
+    assert snes.cores == ("snes9x2005", "snes9x_3ds")

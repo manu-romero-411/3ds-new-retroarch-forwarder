@@ -4,7 +4,7 @@
   "gba": {"name": "Game Boy Advance", "core": "gpsp", "extensions": ["gba"], "libretro": "Nintendo - Game Boy Advance", "database": "no-intro"},
   "nes": {"name": "Nintendo Entertainment System", "core": "fceumm", "extensions": ["nes", "unf", "unif"], "libretro": "Nintendo - Nintendo Entertainment System", "database": "no-intro"},
   "fds": {"name": "Famicom Disk System", "core": "fceumm", "extensions": ["fds"], "libretro": "Nintendo - Family Computer Disk System", "database": "no-intro"},
-  "snes": {"name": "Super Nintendo", "core": "snes9x2005", "extensions": ["sfc", "smc"], "libretro": "Nintendo - Super Nintendo Entertainment System", "database": "no-intro"},
+  "snes": {"name": "Super Nintendo", "core": "snes9x2005", "alternatives": ["snes9x_3ds"], "extensions": ["sfc", "smc"], "libretro": "Nintendo - Super Nintendo Entertainment System", "database": "no-intro"},
   "mastersystem": {"name": "Master System", "core": "genesis_plus_gx", "extensions": ["sms"], "libretro": "Sega - Master System - Mark III", "database": "no-intro"},
   "megadrive": {"name": "Mega Drive", "core": "genesis_plus_gx", "extensions": ["md", "gen", "smd"], "libretro": "Sega - Mega Drive - Genesis", "database": "no-intro"},
   "gamegear": {"name": "Game Gear", "core": "genesis_plus_gx", "extensions": ["gg"], "libretro": "Sega - Game Gear", "database": "no-intro"},

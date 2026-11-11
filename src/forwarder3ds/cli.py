@@ -412,12 +412,15 @@ def _cmd_cores(args: argparse.Namespace, settings: Settings) -> int:
     built = set(find_toolchain(settings.toolchain).available_cores())
     wanted = (args.filter or "").casefold()
     for system in sorted(systems, key=lambda s: s.console):
-        text = f"{system.console} {system.name} {system.core}".casefold()
+        text = f"{system.console} {system.name} {' '.join(system.cores)}".casefold()
         if wanted and wanted not in text:
             continue
-        status = "base ready" if system.core in built else "no base"
         extensions = ", ".join(f".{ext}" for ext in system.extensions)
-        print(f"{system.console:<14} {system.core:<20} {status:<11} {system.name} ({extensions})")
+        for index, core in enumerate(system.cores):
+            status = "base ready" if core in built else "no base"
+            label = f"{system.name} ({extensions})" if index == 0 else "  alternative"
+            console = system.console if index == 0 else ""
+            print(f"{console:<14} {core:<20} {status:<11} {label}")
     return 0
 
 

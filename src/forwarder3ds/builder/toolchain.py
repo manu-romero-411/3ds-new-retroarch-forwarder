@@ -2,8 +2,9 @@
 
 A build calls two programs from the 3DS homebrew toolchain, ``bannertool``
 (SMDH icon and banner) and ``makerom`` (the ``.cia``), and packs one of the
-RetroArch *bases* (RetroArch + one core, compiled once with devkitARM by
-``packaging/toolchain/build-base.sh``). The release packages and
+*bases*, compiled once with devkitARM by ``packaging/toolchain/build-base.sh``:
+RetroArch + one core, or a standalone emulator (e.g. ``snes9x_3ds``) that
+brings its own RSF and RomFS files. The release packages and
 ``install.sh`` ship them, built for the user's system and architecture, in
 a ``toolchain/`` directory::
 
@@ -13,6 +14,9 @@ a ``toolchain/`` directory::
     ├── bases/<core>/retroarch.elf     RetroArch + core, patched
     ├── bases/<core>/base.env          memory mode and source revisions
     ├── bases/<core>/assets/bottom_menu.png
+    ├── bases/<emulator>/app.elf       a standalone emulator, patched
+    ├── bases/<emulator>/app.rsf       its makerom settings
+    ├── bases/<emulator>/romfs/        its own RomFS files
     └── VERSIONS                       what was built, from which revision
 
 Each item is resolved on its own, first match wins:
@@ -42,15 +46,25 @@ _log = get_logger("toolchain")
 
 BASES_DIR = "bases"
 BASE_ELF = "retroarch.elf"
+STANDALONE_ELF = "app.elf"
+STANDALONE_RSF = "app.rsf"
+STANDALONE_ROMFS = "romfs"
 BASE_ENV = "base.env"
 BOTTOM_MENU_ASSET = "assets/bottom_menu.png"
 VERSIONS_FILE = "VERSIONS"
 _CHECKOUT_BASES = Path(__file__).resolve().parents[3] / "toolchain" / BASES_DIR
 
 
+def _base_elf(directory: Path) -> Path | None:
+    for name in (BASE_ELF, STANDALONE_ELF):
+        if (directory / name).is_file():
+            return directory / name
+    return None
+
+
 @dataclass(frozen=True)
-class Base:
-    """One compiled RetroArch base: RetroArch statically linked with ``core``."""
+class Base:  # pylint: disable=too-many-instance-attributes
+    """One compiled base: RetroArch linked with ``core``, or a standalone emulator."""
 
     core: str
     elf: Path
@@ -59,15 +73,26 @@ class Base:
     big_text_section: bool
     bottom_menu: Path | None
     info: dict[str, str]
+    #: A standalone emulator's own RSF and RomFS files (``None`` for RetroArch).
+    rsf: Path | None = None
+    romfs: Path | None = None
+
+    @property
+    def standalone(self) -> bool:
+        """True for a standalone emulator (no RetroArch settings apply)."""
+        return self.info.get("KIND") == "standalone"
 
     @classmethod
     def load(cls, directory: Path) -> "Base":
         """Read ``directory`` (``bases/<core>``); raise :class:`BuildError` if broken."""
-        elf, env = directory / BASE_ELF, directory / BASE_ENV
-        if not elf.is_file() or not env.is_file():
-            raise BuildError(f"Incomplete RetroArch base in {directory} (rebuild it).")
+        elf, env = _base_elf(directory), directory / BASE_ENV
+        if elf is None or not env.is_file():
+            raise BuildError(f"Incomplete base in {directory} (rebuild it).")
         info = _parse_versions(env)
         bottom_menu = directory / BOTTOM_MENU_ASSET
+        rsf, romfs = directory / STANDALONE_RSF, directory / STANDALONE_ROMFS
+        if info.get("KIND") == "standalone" and not rsf.is_file():
+            raise BuildError(f"The base in {directory} has no {STANDALONE_RSF} (rebuild it).")
         return cls(
             core=info.get("CORE_NAME", directory.name),
             elf=elf,
@@ -76,6 +101,8 @@ class Base:
             big_text_section=info.get("APP_BIG_TEXT_SECTION", "0") == "1",
             bottom_menu=bottom_menu if bottom_menu.is_file() else None,
             info=info,
+            rsf=rsf if rsf.is_file() else None,
+            romfs=romfs if romfs.is_dir() else None,
         )
 
 
@@ -104,14 +131,14 @@ class Toolchain:
         """Cores with a compiled base, sorted."""
         if self.bases is None:
             return []
-        return sorted(entry.name for entry in self.bases.iterdir() if (entry / BASE_ELF).is_file())
+        return sorted(entry.name for entry in self.bases.iterdir() if _base_elf(entry))
 
     def base(self, core: str) -> Base:
         """The base for ``core``; raise :class:`BuildError` if there is none."""
-        if self.bases is None or not (self.bases / core / BASE_ELF).is_file():
+        if self.bases is None or _base_elf(self.bases / core) is None:
             available = ", ".join(self.available_cores()) or "none"
             raise BuildError(
-                f"No RetroArch base for core '{core}' (available: {available}). Build it with "
+                f"No base for '{core}' (available: {available}). Build it with "
                 f"packaging/toolchain/build-base.sh TOOLCHAIN_DIR {core}."
             )
         return Base.load(self.bases / core)
