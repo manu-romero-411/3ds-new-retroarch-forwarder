@@ -13,7 +13,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from forwarder3ds.artwork.banner_card import CardStyle, render_card_png
-from forwarder3ds.artwork.bottom_screen import BottomScreenStyle
+from forwarder3ds.artwork.bottom_screen import (
+    CHOICE_DEFAULT,
+    CHOICE_IMAGE,
+    BottomScreenStyle,
+    choice_language,
+)
 from forwarder3ds.builder.errors import BuildError
 from forwarder3ds.builder.injector import GameRequest, request_from_project
 from forwarder3ds.builder.toolchain import Toolchain, find_toolchain
@@ -34,7 +39,8 @@ from forwarder3ds.core.title_id import (
 
 _log = get_logger("gui")
 #: Standalone emulators with a recipe (``emulators/``), known even before they are built.
-STANDALONE_EMULATORS = frozenset({"snes9x_3ds"})
+#: Standalone emulators -> their menu's name, for when their base is not built.
+STANDALONE_EMULATORS = {"snes9x_3ds": "snes9x"}
 
 
 @dataclass
@@ -91,6 +97,15 @@ class AppContext:  # pylint: disable=too-many-instance-attributes
             return self.tools.base(core).standalone
         except BuildError:
             return False
+
+    def menu_name(self, core: str) -> str:
+        """The emulator's menu, as the touch screen message names it."""
+        if self.tools is not None and core in self.available_cores():
+            try:
+                return self.tools.base(core).menu_name
+            except BuildError:
+                pass
+        return STANDALONE_EMULATORS.get(core, "RetroArch")
 
     def core_options(self, core: str) -> CoreOptions | None:
         """The options of ``core``'s base, or ``None`` if it ships none."""
@@ -159,13 +174,21 @@ class AppContext:  # pylint: disable=too-many-instance-attributes
             request = request_from_project(project, output or Path(), self.systems)
         except BuildError:
             return None
-        request.bottom_screen = self.bottom_screen_style()
+        if project.bottom_screen == CHOICE_IMAGE:
+            request.bottom_image = project.asset(Asset.BOTTOM_SCREEN)
+        else:
+            request.bottom_screen = self.bottom_screen_style(project.bottom_screen)
         return request
 
-    def bottom_screen_style(self) -> BottomScreenStyle | None:
-        """The touch screen picture's language and font (``None``: turned off)."""
+    def bottom_screen_style(self, choice: str = CHOICE_DEFAULT) -> BottomScreenStyle | None:
+        """The VC style touch screen for a project's ``choice`` (``None``: the emulator's own)."""
         touch = self.settings.bottom_screen
-        return BottomScreenStyle(touch.language, touch.font) if touch.enabled else None
+        language = choice_language(choice)
+        if language is not None:
+            return BottomScreenStyle(language, touch.font)
+        if choice == CHOICE_DEFAULT and touch.enabled:
+            return BottomScreenStyle(touch.language, touch.font)
+        return None
 
     def preview_unique_id(self, project: Project) -> tuple[int | None, str | None]:
         """``(unique_id, None)``, ``(None, error)``, or ``(None, None)`` if incomplete."""

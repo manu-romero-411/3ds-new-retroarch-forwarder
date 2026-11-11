@@ -40,6 +40,7 @@ from forwarder3ds.builder.media import (
     prepare_banner_audio,
     prepare_banner_image,
     prepare_bezel,
+    prepare_bottom_image,
     prepare_flat_bezel,
     prepare_icon,
 )
@@ -133,6 +134,9 @@ class GameRequest:  # pylint: disable=too-many-instance-attributes
     manual_unique_id: int | None = None
     #: The Virtual Console style touch screen (``None``: the emulator's own).
     bottom_screen: BottomScreenStyle | None = None
+    #: A touch screen picture of the user's (any size, stretched to 320x240);
+    #: wins over ``bottom_screen``.
+    bottom_image: Path | None = None
     #: Keep the game out of the HOME menu's Activity Log.
     hide_from_activity_log: bool = False
     #: Set when rebuilding a CIA loaded from disk under its original Title
@@ -351,16 +355,21 @@ def write_romfs(directory: Path, request: GameRequest, base: Base) -> Path:
     return romfs
 
 
+def _write_bottom_picture(target: Path, request: GameRequest, base: Base) -> None:
+    """The touch screen picture at ``target``: the user's image, the VC style one, or none."""
+    if request.bottom_image is not None:
+        prepare_bottom_image(request.bottom_image, target)
+    elif request.bottom_screen is not None:
+        render_bottom_screen_to_file(target, base.menu_name, request.bottom_screen)
+
+
 def _write_retroarch_pictures(romfs: Path, request: GameRequest, base: Base) -> None:
     """Touch screen pictures (menu and idle) and the bezel overlay, for RetroArch."""
     if base.bottom_menu is not None:
         shutil.copyfile(base.bottom_menu, romfs / BOTTOM_MENU_FILE)
     else:
         _log.warning("The %s base has no bottom_menu.png: no touch screen menu", base.core)
-    if request.bottom_screen is not None:
-        render_bottom_screen_to_file(
-            romfs / BOTTOM_IDLE_FILE, base.menu_name, request.bottom_screen
-        )
+    _write_bottom_picture(romfs / BOTTOM_IDLE_FILE, request, base)
     if request.bezel is not None:
         prepare_bezel(request.bezel, romfs / BEZEL_FILE)
         (romfs / BEZEL_OVERLAY_FILE).write_text(BEZEL_OVERLAY, encoding="utf-8")
@@ -373,11 +382,10 @@ def _write_standalone_pictures(romfs: Path, request: GameRequest, base: Base) ->
     picture behind the game (``base.env``); the bezel is flattened on black,
     as the emulator draws it under the game, without transparency.
     """
-    if request.bottom_screen is not None:
-        for name in base.bottom_screen_files:
-            target = romfs / name
-            target.parent.mkdir(parents=True, exist_ok=True)
-            render_bottom_screen_to_file(target, base.menu_name, request.bottom_screen)
+    for name in base.bottom_screen_files:
+        target = romfs / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        _write_bottom_picture(target, request, base)
     for name in base.top_background_files:
         target = romfs / name
         target.parent.mkdir(parents=True, exist_ok=True)

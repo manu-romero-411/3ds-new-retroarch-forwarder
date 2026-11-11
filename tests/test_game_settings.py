@@ -161,6 +161,7 @@ def test_projects_store(tmp_path: Path) -> None:
     project.remap = {"a": "b"}
     project.screen = ScreenSettings(ScreenMode.PIXEL_PERFECT)
     project.banner_style = BannerStyle.SNAPSHOT
+    project.bottom_screen = "vc:ja"
     store.save(project)
     icon = tmp_path / "icon.PNG"
     icon.write_bytes(b"png")
@@ -169,6 +170,7 @@ def test_projects_store(tmp_path: Path) -> None:
 
     (listed,) = store.list()
     assert listed.remap == {"a": "b"} and listed.banner_style is BannerStyle.SNAPSHOT
+    assert listed.bottom_screen == "vc:ja"
     request = request_from_project(listed, tmp_path / "out.cia")
     assert (request.console, request.core, request.folder) == ("gb", "gambatte", "Tetris")
     assert request.icon == listed.asset(Asset.ICON)
@@ -238,6 +240,26 @@ def test_standalone_base_pictures(tmp_path: Path) -> None:
     with Image.open(romfs / "gfx/game.png") as game:
         assert game.size == (400, 240) and game.mode == "RGB"
         assert game.getpixel((200, 120)) == (0, 0, 0)  # transparent bezel: flattened on black
+
+
+def test_own_touch_screen_image(tmp_path: Path) -> None:
+    base_dir = tmp_path / "bases" / "snes9x_3ds"
+    (base_dir / "romfs").mkdir(parents=True)
+    (base_dir / "app.elf").write_bytes(b"\x7fELF")
+    (base_dir / "app.rsf").write_text("RomFs:\n", encoding="utf-8")
+    (base_dir / "base.env").write_text(
+        "KIND=standalone\nCORE_NAME=snes9x_3ds\nBOTTOM_SCREEN_FILES=gfx/second.png\n",
+        encoding="utf-8",
+    )
+    picture = tmp_path / "touch.png"
+    Image.new("RGB", (64, 48), (10, 200, 30)).save(picture)
+    rom = tmp_path / "Game.sfc"
+    rom.write_bytes(b"\0" * 16)
+    request = make_request(rom=rom, core="snes9x_3ds", long_name="Game", output=tmp_path / "o.cia",
+                           bottom_screen=BottomScreenStyle(), bottom_image=picture)  # fmt: skip
+    romfs = write_romfs(tmp_path / "scratch", request, Base.load(base_dir))
+    with Image.open(romfs / "gfx/second.png") as second:
+        assert second.size == (320, 240) and second.getpixel((160, 120)) == (10, 200, 30)
 
 
 def test_snes_alternatives() -> None:

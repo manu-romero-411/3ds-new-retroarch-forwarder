@@ -64,6 +64,7 @@ from forwarder3ds.gui.dialogs.injection_options_dialog import (
     GameContext,
     InjectionOptions,
     InjectionOptionsDialog,
+    ScreenshotLoader,
 )
 from forwarder3ds.gui.jingle_player import JinglePlayer
 from forwarder3ds.gui.sgdb_picker import SgdbPicker
@@ -743,11 +744,22 @@ class ProjectEditor(QScrollArea):  # pylint: disable=too-many-instance-attribute
             parts.append(self.tr("bilinear"))
         if project.asset(Asset.BEZEL):
             parts.append(self.tr("bezel"))
+        if project.bottom_screen:
+            parts.append(self.tr("own touch screen"))
         if project.remap:
             parts.append(self.tr("custom buttons"))
         if project.core_options:
             parts.append(self.tr("{n} core option(s)").format(n=len(project.core_options)))
         self._options_summary.setText(", ".join(parts))
+
+    def _screenshot_loader(self) -> ScreenshotLoader | None:
+        """Fetches libretro's screenshot of the game, for the screen preview."""
+        system, name = self._system(), self._project.db_name
+        if system is None or not name:
+            return None
+        return lambda done: self._run(
+            lambda: fetch_thumbnail(system, name, ThumbnailKind.SNAP), done
+        )
 
     def _edit_options(self) -> None:
         project = self._project
@@ -758,13 +770,20 @@ class ProjectEditor(QScrollArea):  # pylint: disable=too-many-instance-attribute
             core=project.core,
             core_options=self._context.core_options(project.core),
             standalone=self._context.is_standalone(project.core),
+            menu_name=self._context.menu_name(project.core),
+            default_touch=self._context.bottom_screen_style(),
+            touch_font=self._context.settings.bottom_screen.font,
+            load_screenshot=self._screenshot_loader(),
         )
         bezel = project.asset(Asset.BEZEL)
+        touch_image = project.asset(Asset.BOTTOM_SCREEN)
         current = InjectionOptions(
             screen=project.screen,
             core_options=dict(project.core_options),
             remap=dict(project.remap),
             bezel=bezel,
+            bottom_screen=project.bottom_screen,
+            bottom_image=touch_image,
         )
         edited = InjectionOptionsDialog.edit(self, game, current)
         if edited is None:
@@ -772,7 +791,10 @@ class ProjectEditor(QScrollArea):  # pylint: disable=too-many-instance-attribute
         project.screen = edited.screen
         project.core_options = edited.core_options
         project.remap = edited.remap
+        project.bottom_screen = edited.bottom_screen
         if edited.bezel != bezel:
             self._set_asset(Asset.BEZEL, edited.bezel)
+        if edited.bottom_image != touch_image:
+            self._set_asset(Asset.BOTTOM_SCREEN, edited.bottom_image)
         self._show_options_summary()
         self.save()

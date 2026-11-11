@@ -34,6 +34,7 @@ from forwarder3ds.ctr.formats import (
 _RESAMPLE = Image.Resampling.BICUBIC
 #: The 3DS top screen; the bezel covers it whole.
 BEZEL_WIDTH, BEZEL_HEIGHT = 400, 240
+BOTTOM_WIDTH, BOTTOM_HEIGHT = 320, 240
 
 
 def _open_image(src: Path) -> Image.Image:
@@ -76,6 +77,13 @@ def prepare_bezel(src: Path, dst: Path) -> None:
     the middle of the screen, leaving 40-pixel bands on each side.
     """
     resize_image_stretch(src, dst, BEZEL_WIDTH, BEZEL_HEIGHT)
+
+
+def prepare_bottom_image(src: Path, dst: Path) -> None:
+    """Stretch ``src`` over the 320x240 touch screen, as an opaque PNG at ``dst``."""
+    flat = Image.new("RGBA", (BOTTOM_WIDTH, BOTTOM_HEIGHT), (0, 0, 0, 255))
+    flat.alpha_composite(_open_image(src).resize(flat.size, _RESAMPLE))
+    flat.convert("RGB").save(dst, format="PNG")
 
 
 def prepare_flat_bezel(src: Path | None, dst: Path) -> None:

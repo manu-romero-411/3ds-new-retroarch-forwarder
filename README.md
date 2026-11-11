@@ -30,8 +30,13 @@ RetroArch installed and never touches `sdmc:/retroarch`.
 - A **Virtual Console style touch screen** while the game runs ("Tap the
   Touch Screen to go to the RetroArch menu." and "⌂: Return to HOME Menu"),
   in English, Japanese, French, German, Italian, Spanish, Dutch, Portuguese
-  or Russian (Settings › Touch screen, `--touch-language`). Nintendo's font
-  is FOT-Rodin: it is not included, point the setting to your copy.
+  or Russian (Settings › Touch screen, `--touch-language`). Each project
+  can pick another language, an image of its own (`--touch-image`) or the
+  emulator's own screen. Nintendo's font is FOT-Rodin: it is not included,
+  point the setting to your copy.
+- The injection options **preview both screens**: the game (libretro's
+  screenshot, when the ROM is matched) scaled as the screen mode says, the
+  bezel and the touch screen picture.
 - A trimmed pause menu (black theme, A confirms): the touch screen shows RetroArch's 3DS menu
   (resume, save state, load state) and the Quick Menu keeps only what makes
   sense for one game. CD games are single `.chd` files.

@@ -261,6 +261,7 @@ def _request_from_args(args: argparse.Namespace, settings: Settings, scratch: Pa
         manual_unique_id=unique_id,
         replace_existing_id=loaded is not None and unique_id == loaded.unique_id,
         bottom_screen=_bottom_screen(args, settings),
+        bottom_image=None if args.no_touch_screen else args.touch_image,
     )
 
 
@@ -576,6 +577,12 @@ def _add_build_parser(sub: argparse._SubParsersAction) -> None:
         "--touch-language",
         choices=sorted(MESSAGES),
         help="language of the touch screen message (default: the settings')",
+    )
+    touch.add_argument(
+        "--touch-image",
+        type=Path,
+        metavar="IMAGE",
+        help="your own touch screen picture (stretched to 320x240) instead of the message",
     )
     touch.add_argument(
         "--no-touch-screen", action="store_true", help="keep the emulator's own touch screen"

@@ -48,6 +48,8 @@ class Asset(str, Enum):
     LOGO = "logo"
     #: The console icon on the default banner's tag (instead of the default one).
     TAG_ICON = "tag_icon"
+    #: The touch screen picture, when the project uses its own.
+    BOTTOM_SCREEN = "bottom_screen"
 
 
 class BannerStyle(str, Enum):
@@ -99,6 +101,11 @@ class Project:  # pylint: disable=too-many-instance-attributes
     #: Year on the banner's tag; empty: the database's year.
     banner_year: str = ""
     screen: ScreenSettings = field(default_factory=ScreenSettings)
+    #: The touch screen: empty for the settings' choice, ``none`` for the
+    #: emulator's own, ``vc:<language>`` for the Virtual Console style
+    #: message, ``image`` for the project's own picture (see
+    #: :mod:`forwarder3ds.artwork.bottom_screen`).
+    bottom_screen: str = ""
     core_options: dict[str, str] = field(default_factory=dict)
     remap: dict[str, str] = field(default_factory=dict)
     #: The last CIA built from this project.
@@ -156,6 +163,7 @@ class Project:  # pylint: disable=too-many-instance-attributes
             "banner_show_name": self.banner_show_name,
             "banner_year": self.banner_year,
             "screen": self.screen.to_json(),
+            "bottom_screen": self.bottom_screen,
             "core_options": dict(self.core_options),
             "remap": dict(self.remap),
             "output": self.output,
@@ -205,6 +213,7 @@ class Project:  # pylint: disable=too-many-instance-attributes
             banner_show_name=bool(data.get("banner_show_name", False)),
             banner_year=text("banner_year"),
             screen=ScreenSettings.from_json(data.get("screen")),
+            bottom_screen=text("bottom_screen"),
             core_options=strings("core_options"),
             remap=normalize_remap(strings("remap")),
             output=text("output"),

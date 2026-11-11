@@ -62,6 +62,25 @@ LANGUAGE_NAMES: dict[str, str] = {
 
 DEFAULT_LANGUAGE = "en"
 
+# A project's touch screen choice (``Project.bottom_screen``).
+#: The settings' choice.
+CHOICE_DEFAULT = ""
+#: The emulator's own screen.
+CHOICE_NONE = "none"
+#: An image of the project's own.
+CHOICE_IMAGE = "image"
+_CHOICE_VC = "vc:"
+
+
+def vc_choice(language: str) -> str:
+    """The choice "Virtual Console message in ``language``"."""
+    return _CHOICE_VC + language
+
+
+def choice_language(choice: str) -> str | None:
+    """The message language of a :func:`vc_choice`, else ``None``."""
+    return choice[len(_CHOICE_VC) :] if choice.startswith(_CHOICE_VC) else None
+
 _FONT_SIZE = 16
 _LINE_HEIGHT = 19
 _TEXT_WIDTH = 236
