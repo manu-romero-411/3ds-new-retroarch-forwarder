@@ -159,8 +159,15 @@ class MainWindow(QMainWindow):  # pylint: disable=too-many-instance-attributes
         new = self._action(
             self.tr("New"), "document-new", pixmap.SP_FileIcon, QKeySequence.StandardKey.New
         )
+        open_rom = self._action(
+            self.tr("Open ROM…"),
+            "document-import",
+            pixmap.SP_FileDialogStart,
+            QKeySequence("Ctrl+R"),
+        )
+        open_rom.setToolTip(self.tr("Start a new game from a ROM file (Ctrl+R)"))
         open_ = self._action(
-            self.tr("Open…"),
+            self.tr("Open CIA…"),
             "document-open",
             pixmap.SP_DialogOpenButton,
             QKeySequence.StandardKey.Open,
@@ -185,11 +192,12 @@ class MainWindow(QMainWindow):  # pylint: disable=too-many-instance-attributes
         )
         save.setToolTip(self.tr("Build the .cia (Ctrl+S)"))
         new.triggered.connect(self._on_new)
+        open_rom.triggered.connect(self._on_open_rom)
         open_.triggered.connect(self._on_open)
         save.triggered.connect(self._on_save)
         save_as.triggered.connect(self._on_save_as)
         settings.triggered.connect(self._open_settings_window)
-        self._file_actions = [new, open_, save, save_as]
+        self._file_actions = [new, open_rom, open_, save, save_as]
 
         toolbar = QToolBar(self.tr("Main"))
         toolbar.setObjectName("main-toolbar")
@@ -231,6 +239,7 @@ class MainWindow(QMainWindow):  # pylint: disable=too-many-instance-attributes
 
     def _connect_signals(self) -> None:
         self._game.changed.connect(self._on_content_changed)
+        self._game.hero_offered.connect(self._presentation.set_hero)
         self._presentation.changed.connect(self._mark_dirty)
         self._presentation.previews_changed.connect(self._preview.show_artwork)
         self._presentation.settings_requested.connect(lambda: self._open_settings(PAGE_STEAMGRIDDB))
@@ -405,9 +414,18 @@ class MainWindow(QMainWindow):  # pylint: disable=too-many-instance-attributes
 
     # ── New / Open ───────────────────────────────────────────────────────
 
+    def _on_open_rom(self) -> None:
+        if not self._confirm_discard(self.tr("start a new game")):
+            return
+        self._start_new_document()
+        self._game.browse_rom()
+
     def _on_new(self) -> None:
         if not self._confirm_discard(self.tr("start a new game")):
             return
+        self._start_new_document()
+
+    def _start_new_document(self) -> None:
         self._discard_loaded_files()
         self._game.reset()
         self._presentation.reset()

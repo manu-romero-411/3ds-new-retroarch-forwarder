@@ -271,6 +271,12 @@ class PresentationPanel(QWidget):
             return
         self._set_image(kind, data, source)
 
+    def set_hero(self, data: bytes, source: str) -> None:
+        """Use ``data`` as the banner background (e.g. a libretro title screen)."""
+        if self._banner_override is not None:
+            self._set_banner_override(None, "")
+        self._set_image(AssetKind.HERO, data, source)
+
     # ── Files ────────────────────────────────────────────────────────────
 
     def _read_image_file(self, title: str) -> tuple[bytes, str] | None:

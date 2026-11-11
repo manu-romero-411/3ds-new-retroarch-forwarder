@@ -1,4 +1,9 @@
-"""Game panel: which ROM goes in the CIA, for which console and core, and its names.
+"""Game panel, laid out like New Super Ultimate Injector's left column.
+
+* **Game information**: the ROM, its console and what the libretro database
+  says about it (:class:`~forwarder3ds.gui.widgets.rom_info.RomInfo`).
+* **CIA metadata**: the names shown on the HOME menu and the publisher.
+* **Content options**: RetroArch core, save folder and bezel.
 
 These are the fields the Title ID is derived from. The panel only collects
 and (re)populates them; the window computes the Title ID preview and runs
@@ -6,7 +11,8 @@ the build.
 
 Fields the user has not touched follow the ones they derive from: the
 console follows the ROM's extension, the core follows the console, the
-names follow the ROM's file name and the save folder follows the long name.
+names follow the database title (or the ROM's file name), the publisher
+follows the database and the save folder follows the long name.
 """
 
 from __future__ import annotations
@@ -14,7 +20,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import QTimer, Signal
 from PySide6.QtGui import QPalette
 from PySide6.QtWidgets import (
     QComboBox,
@@ -30,9 +36,13 @@ from PySide6.QtWidgets import (
 )
 
 from forwarder3ds.core.names import save_folder_name, suggest_title
+from forwarder3ds.core.romdb import DbGame
 from forwarder3ds.core.settings import DEFAULT_MANUFACTURER
 from forwarder3ds.core.systems import SystemCatalog
 from forwarder3ds.gui.widgets.path_picker import PathPicker
+from forwarder3ds.gui.widgets.rom_info import RomInfo
+
+_LOOKUP_DELAY_MS = 400
 
 
 @dataclass
@@ -54,6 +64,8 @@ class GamePanel(QWidget):  # pylint: disable=too-many-instance-attributes
 
     #: Any edit to a field.
     changed = Signal()
+    #: A libretro thumbnail chosen as banner background: PNG bytes, source label.
+    hero_offered = Signal(bytes, str)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -67,6 +79,16 @@ class GamePanel(QWidget):  # pylint: disable=too-many-instance-attributes
         self._suggested_title = ""
         self._suggested_folder = ""
         self._suggested_core = ""
+        self._suggested_manufacturer = ""
+        # A loaded CIA keeps its names even when the database knows better.
+        self._keep_names = False
+        self._rom_info = RomInfo()
+        self._rom_info.identified.connect(self._on_identified)
+        self._rom_info.hero_offered.connect(self.hero_offered)
+        self._lookup_timer = QTimer(self)
+        self._lookup_timer.setSingleShot(True)
+        self._lookup_timer.setInterval(_LOOKUP_DELAY_MS)
+        self._lookup_timer.timeout.connect(self._look_up)
 
         self._rom_edit = QLineEdit()
         self._rom_edit.setPlaceholderText(self.tr("ROM file on this computer"))
@@ -97,7 +119,7 @@ class GamePanel(QWidget):  # pylint: disable=too-many-instance-attributes
         column.setContentsMargins(0, 0, 0, 0)
         column.addWidget(self._build_game_group())
         column.addWidget(self._build_names_group())
-        column.addWidget(self._build_ingame_group())
+        column.addWidget(self._build_content_group())
         column.addStretch(1)
 
         self._rom_edit.textChanged.connect(self._on_rom_changed)
@@ -118,7 +140,7 @@ class GamePanel(QWidget):  # pylint: disable=too-many-instance-attributes
     # ── Construction ─────────────────────────────────────────────────────
 
     def _build_game_group(self) -> QGroupBox:
-        group = QGroupBox(self.tr("Game"))
+        group = QGroupBox(self.tr("Game information"))
         form = QFormLayout(group)
 
         browse = QPushButton(self.tr("Browse…"))
@@ -130,10 +152,23 @@ class GamePanel(QWidget):  # pylint: disable=too-many-instance-attributes
         row.addWidget(browse)
         form.addRow(self.tr("ROM:"), rom_row)
         form.addRow(self.tr("Console:"), self._console_combo)
+        form.addRow(self._rom_info)
+        return group
+
+    def _build_names_group(self) -> QGroupBox:
+        group = QGroupBox(self.tr("CIA metadata"))
+        form = QFormLayout(group)
+        form.addRow(self.tr("Long name:"), self._long_name_edit)
+        form.addRow(self.tr("Short name:"), self._short_name_edit)
+        form.addRow(self.tr("Publisher:"), self._manufacturer_edit)
+        return group
+
+    def _build_content_group(self) -> QGroupBox:
+        group = QGroupBox(self.tr("Content options"))
+        form = QFormLayout(group)
         form.addRow(self.tr("RetroArch core:"), self._core_combo)
         form.addRow(self.tr("Save folder:"), self._folder_edit)
         form.addRow("", self._data_dir_label)
-
         hint = QLabel(
             self.tr(
                 "The ROM is packed inside the CIA. Saves, states, core options and the "
@@ -144,19 +179,6 @@ class GamePanel(QWidget):  # pylint: disable=too-many-instance-attributes
         hint.setWordWrap(True)
         hint.setForegroundRole(QPalette.ColorRole.PlaceholderText)
         form.addRow("", hint)
-        return group
-
-    def _build_names_group(self) -> QGroupBox:
-        group = QGroupBox(self.tr("HOME menu"))
-        form = QFormLayout(group)
-        form.addRow(self.tr("Long name:"), self._long_name_edit)
-        form.addRow(self.tr("Short name:"), self._short_name_edit)
-        form.addRow(self.tr("Manufacturer:"), self._manufacturer_edit)
-        return group
-
-    def _build_ingame_group(self) -> QGroupBox:
-        group = QGroupBox(self.tr("In game"))
-        form = QFormLayout(group)
         form.addRow(self.tr("Bezel:"), self._bezel)
         hint = QLabel(
             self.tr(
@@ -259,7 +281,11 @@ class GamePanel(QWidget):  # pylint: disable=too-many-instance-attributes
         return None
 
     def set_fields(self, fields: GameFields) -> None:
-        """Fill every field (e.g. from a loaded CIA). ``changed`` fires as usual."""
+        """Fill every field (e.g. from a loaded CIA). ``changed`` fires as usual.
+
+        The names given here stay even if the database later suggests others.
+        """
+        self._keep_names = True
         self._rom_edit.setText(fields.rom)
         self._select_console(fields.console)
         self._select_core(fields.core)
@@ -272,7 +298,18 @@ class GamePanel(QWidget):  # pylint: disable=too-many-instance-attributes
     def reset(self) -> None:
         """Back to an empty form."""
         self._suggested_title = self._suggested_folder = self._suggested_core = ""
+        self._suggested_manufacturer = ""
         self.set_fields(GameFields("", "", "", "", "", "", self._default_manufacturer))
+        self._keep_names = False
+
+    def browse_rom(self) -> None:
+        """Ask for the ROM file (the toolbar's *Open ROM…*)."""
+        self._browse_rom()
+
+    @property
+    def database_game(self) -> DbGame | None:
+        """The libretro database entry of the ROM, if it has one."""
+        return self._rom_info.game
 
     # ── Behaviour ────────────────────────────────────────────────────────
 
@@ -287,6 +324,7 @@ class GamePanel(QWidget):  # pylint: disable=too-many-instance-attributes
         )
         if path:
             self._last_dir = Path(path).parent
+            self._keep_names = False
             self._rom_edit.setText(path)
 
     def _on_rom_changed(self, rom: str) -> None:
@@ -298,6 +336,28 @@ class GamePanel(QWidget):  # pylint: disable=too-many-instance-attributes
         guessed = self._systems.guess(Path(rom)) if self._systems and rom else None
         if guessed is not None:
             self._select_console(guessed.console)
+        self._lookup_timer.start()
+
+    def _look_up(self) -> None:
+        """Identify the ROM in its console's libretro database."""
+        fields = self.fields()
+        system = self._systems.get(fields.console) if self._systems and fields.console else None
+        self._rom_info.set_rom(Path(fields.rom) if fields.rom else None, system)
+
+    def _on_identified(self, game: DbGame | None) -> None:
+        """Follow the database: its title for the names, its publisher."""
+        if game is None or self._keep_names:
+            return
+        previous, self._suggested_title = self._suggested_title, game.title
+        for edit in (self._long_name_edit, self._short_name_edit):
+            if edit.text() in ("", previous):
+                edit.setText(self._suggested_title)
+        if game.publisher:
+            current = self._manufacturer_edit.text().strip()
+            untouched = ("", self._default_manufacturer, self._suggested_manufacturer)
+            self._suggested_manufacturer = game.publisher
+            if current in untouched:
+                self._manufacturer_edit.setText(game.publisher)
 
     def _on_console_changed(self) -> None:
         """Follow the console with its default core, unless the core was picked by hand."""
@@ -308,6 +368,7 @@ class GamePanel(QWidget):  # pylint: disable=too-many-instance-attributes
         if self._selected_core() in ("", previous):
             self._select_core(default)
         self._show_data_dir()
+        self._lookup_timer.start()
         self.changed.emit()
 
     def _follow_long_name(self, long_name: str) -> None:

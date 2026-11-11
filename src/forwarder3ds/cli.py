@@ -4,6 +4,7 @@ Commands::
 
     3ds-forwarder build [options]     build (or rebuild) one game .cia
     3ds-forwarder inspect FILE.cia    show what a game .cia contains
+    3ds-forwarder identify ROM        look a ROM up in the libretro database
     3ds-forwarder cores [FILTER]      list the consoles, their cores and the bases built
     3ds-forwarder media               list the banner jingles and platform logos
     3ds-forwarder doctor              check the toolchain and the SteamGridDB key
@@ -35,7 +36,15 @@ from forwarder3ds.builder.injector import (
 from forwarder3ds.builder.toolchain import find_toolchain
 from forwarder3ds.core import catalog, paths
 from forwarder3ds.core.logs import get_logger, log_success, setup_console_logging
+from forwarder3ds.artwork.libretro import (
+    DatabaseUnavailableError,
+    ThumbnailKind,
+    load_database,
+    thumbnail_url,
+)
 from forwarder3ds.core.names import suggest_title
+from forwarder3ds.core.romdb import Identification, MatchKind, identify
+from forwarder3ds.core.systems import System
 from forwarder3ds.core.settings import Settings, load_settings, masked
 from forwarder3ds.core.title_id import unique_id_to_title_id
 from forwarder3ds.ctr.cia import CiaReadError, LoadedGame, read_game_cia
@@ -125,6 +134,33 @@ def _rom_from_args(args: argparse.Namespace, loaded: LoadedGame | None, scratch:
         raise BuildError(str(exc)) from exc
 
 
+def _system_for(rom: Path, console: str | None) -> System | None:
+    """The console given, or the one ``rom``'s extension points to."""
+    systems = load_systems()
+    return systems.get(console) if console else systems.guess(rom)
+
+
+def _identify(rom: Path, system: System, refresh: bool = False) -> Identification | None:
+    """Look ``rom`` up; ``None`` (with a warning) when the database is unavailable."""
+    try:
+        database = load_database(system, refresh)
+    except DatabaseUnavailableError as exc:
+        _log.warning("%s", exc)
+        return None
+    found = identify(rom, system, database)
+    if found.kind is MatchKind.NONE:
+        _log.warning(
+            "%s is not in the %s database (a hack, a translation or a bad dump?)",
+            rom.name,
+            system.name,
+        )
+    elif found.kind is MatchKind.NAME:
+        _log.warning("Matched “%s” by file name only: check it", found.game.name)
+    else:
+        _log.info("Identified as “%s”", found.game.name)
+    return found
+
+
 def _request_from_args(args: argparse.Namespace, settings: Settings, scratch: Path) -> GameRequest:
     """Merge the flags over the loaded CIA (if any) and the settings."""
     loaded = _load_source_cia(args.from_cia) if args.from_cia else None
@@ -134,8 +170,13 @@ def _request_from_args(args: argparse.Namespace, settings: Settings, scratch: Pa
         return flag if flag is not None else (from_cia if loaded else "")
 
     rom = _rom_from_args(args, loaded, scratch)
+    found = None
+    if args.identify:
+        system = _system_for(rom, pick(args.console, loaded.console if loaded else ""))
+        found = _identify(rom, system) if system else None
+    db_game = found.game if found else None
     long_name = pick(args.long_name, loaded.long_name if loaded else "")
-    long_name = long_name or suggest_title(rom.name)
+    long_name = long_name or (db_game.title if db_game else suggest_title(rom.name))
     if not long_name:
         raise BuildError("--long-name is required (no name could be derived).")
 
@@ -169,6 +210,7 @@ def _request_from_args(args: argparse.Namespace, settings: Settings, scratch: Pa
         long_name=long_name,
         short_name=pick(args.short_name, loaded.short_name if loaded else ""),
         manufacturer=pick(args.manufacturer, loaded.manufacturer if loaded else "")
+        or (db_game.publisher if db_game else "")
         or settings.general.manufacturer,
         name=args.name or "",
         output=output,
@@ -243,6 +285,42 @@ def _cmd_inspect(args: argparse.Namespace, _settings: Settings) -> int:
             if path:
                 log_success(_log, "Wrote %s", path)
     return 0
+
+
+def _cmd_identify(args: argparse.Namespace, _settings: Settings) -> int:
+    if not args.rom.is_file():
+        _log.error("The ROM does not exist: %s", args.rom)
+        return 1
+    try:
+        system = _system_for(args.rom, args.console)
+    except BuildError as exc:
+        _log.error("%s", exc)
+        return 1
+    if system is None:
+        _log.error("Cannot tell the console of %s; give --console", args.rom.name)
+        return 1
+    found = _identify(args.rom, system, args.refresh)
+    if found is None:
+        return 1
+    rows = [("Console", f"{system.console} ({system.libretro})")]
+    if found.crc is not None:
+        rows.append(("CRC32", f"{found.crc:08X}"))
+    rows.append(("Match", found.kind.value))
+    if found.game is not None:
+        game = found.game
+        rows += [
+            ("Name", game.name),
+            ("Title", game.title),
+            ("Publisher", game.publisher or "?"),
+            ("Developer", game.developer or "?"),
+            ("Year", game.year or "?"),
+        ]
+        rows += [(kind.label, thumbnail_url(system, game.name, kind)) for kind in ThumbnailKind]
+    for label, value in rows:
+        print(f"{label + ':':<14}{value}")
+    for other in found.candidates[1:]:
+        print(f"{'Also like:':<14}{other.name}")
+    return 0 if found.game is not None else 3
 
 
 def _cmd_cores(args: argparse.Namespace, settings: Settings) -> int:
@@ -363,6 +441,12 @@ def _add_build_parser(sub: argparse._SubParsersAction) -> None:
         "--long-name",
         help="SMDH long name; also the SteamGridDB search term (default: from the ROM name)",
     )
+    game.add_argument(
+        "--identify",
+        action="store_true",
+        help="look the ROM up in the libretro database: its title and publisher become "
+        "the default names",
+    )
     game.add_argument("--short-name", help="SMDH short name (default: the long name)")
     game.add_argument("--manufacturer", help="SMDH publisher (default: from the settings)")
     game.add_argument("--name", help=argparse.SUPPRESS)  # legacy: internal name in the hash
@@ -413,6 +497,10 @@ def _build_parser() -> argparse.ArgumentParser:
     inspect.add_argument(
         "--extract", type=Path, metavar="DIR", help="write icon/banner/jingle and the ROM"
     )
+    ident = sub.add_parser("identify", help="look a ROM up in the libretro database")
+    ident.add_argument("rom", type=Path)
+    ident.add_argument("--console", help="Batocera console name (default: from the extension)")
+    ident.add_argument("--refresh", action="store_true", help="download the database again")
     cores = sub.add_parser("cores", help="list the consoles and their RetroArch cores")
     cores.add_argument("filter", nargs="?", help="substring of the console or core name")
     sub.add_parser("media", help="list banner jingles and platform logos")
@@ -426,6 +514,7 @@ def _build_parser() -> argparse.ArgumentParser:
 _COMMANDS = {
     "build": _cmd_build,
     "inspect": _cmd_inspect,
+    "identify": _cmd_identify,
     "cores": _cmd_cores,
     "media": _cmd_media,
     "doctor": _cmd_doctor,

@@ -20,6 +20,12 @@ _TRAILING_SEPARATORS = " -_,.:;"
 # Not allowed in FAT32 file names (the 3DS SD card), plus control characters.
 _FAT_FORBIDDEN = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 FALLBACK_FOLDER = "game"
+# No-Intro/Redump put leading articles at the end of the main title:
+# "Legend of Zelda, The - A Link to the Past" is "The Legend of Zelda - ...".
+_TRAILING_ARTICLE = re.compile(
+    r"^(?P<title>.+?), (?P<article>The|A|An|Le|La|Les|L'|Der|Die|Das|El|Los|Las|Il|Lo)"
+    r"(?P<rest>(?: - .*)?)$"
+)
 
 
 def suggest_title(rom_path: str) -> str:
@@ -34,16 +40,35 @@ def suggest_title(rom_path: str) -> str:
     if normalized.endswith("/"):  # a directory (e.g. half-typed path), not a ROM
         return ""
     name = PurePosixPath(normalized).name
-    stem = _EXTENSION.sub("", name)
+    return strip_tags(_EXTENSION.sub("", name))
 
-    title = stem
+
+def strip_tags(name: str) -> str:
+    """``name`` without ``(...)``/``[...]`` tags; ``name`` itself if nothing else is left."""
+    title = name
     while True:  # repeat: tags may sit next to each other, or one inside another
         stripped = _TAG_GROUPS.sub(" ", title)
         if stripped == title:
             break
         title = stripped
     title = _WHITESPACE.sub(" ", title).strip().rstrip(_TRAILING_SEPARATORS).strip()
-    return title or stem.strip()
+    return title or name.strip()
+
+
+def database_title(name: str) -> str:
+    """A No-Intro/Redump game name as a display title.
+
+    Tags go, and a trailing article moves to the front:
+    ``Legend of Zelda, The - A Link to the Past (USA)`` gives
+    ``The Legend of Zelda - A Link to the Past``.
+    """
+    title = strip_tags(name)
+    match = _TRAILING_ARTICLE.match(title)
+    if match:
+        article = match["article"]
+        joiner = "" if article.endswith("'") else " "
+        title = f"{article}{joiner}{match['title']}{match['rest']}"
+    return title
 
 
 def save_folder_name(title: str) -> str:

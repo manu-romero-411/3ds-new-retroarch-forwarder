@@ -29,6 +29,11 @@ RetroArch installed and never touches `sdmc:/retroarch`.
 - A trimmed pause menu: the touch screen shows RetroArch's 3DS menu
   (resume, save state, load state) and the Quick Menu keeps only what makes
   sense for one game. CD games are single `.chd` files.
+- ROMs are **identified against the libretro database** (No-Intro dats by
+  CRC for cartridges, Redump names for discs): title, publisher and year
+  fill the CIA's names, and libretro's title screen and snapshot can be
+  used as the banner background. Hacks, translations or other revisions are
+  flagged and can be matched by hand.
 - Artwork comes from **SteamGridDB** (icon, hero and logo; the banner is the
   hero with the logo on top), or from your own image files.
 - Existing CIAs can be opened, edited and rebuilt under the same Title ID,
@@ -72,10 +77,13 @@ See [packaging/README.md](packaging/README.md) for how packages are built.
 
 The window goes from general to specific:
 
-1. **Game** (left): the ROM file, its console and core, the save folder and
-   the names shown on the HOME menu. The console follows the ROM's
-   extension, the core follows the console, the names follow the ROM's file
-   name and the save folder follows the long name, until you edit them.
+1. **Game** (left), laid out like New Super Ultimate Injector: *Game
+   information* (the ROM, picked with *Open ROM…*, its console and its
+   libretro database match, with title screen and snapshot), *CIA metadata*
+   (names and publisher) and *Content options* (core, save folder, bezel).
+   The console follows the ROM's extension, the core follows the console,
+   the names and publisher follow the database (or the file name) and the
+   save folder follows the long name, until you edit them.
 2. **Presentation** (middle): the **icon**, the **banner** (SteamGridDB hero
    + logo, or a ready-made image, plus an optional platform frame) and the
    **jingle**, with a play button. *SteamGridDB…* searches by the long name;
@@ -101,6 +109,8 @@ the toolchain (with overrides) and your own jingle and logo folders.
 3ds-forwarder build ... --core snes9x2005 --folder "SMW" --long-name "Super Mario World"
 3ds-forwarder build ... --icon icon.png --hero hero.png --logo logo.png --platform-logo snes
 3ds-forwarder build ... --bezel snes-frame.png   # top screen bezel
+3ds-forwarder build --rom game.gb --identify    # names and publisher from the libretro database
+3ds-forwarder identify game.gb                  # what the libretro database says about a ROM
 3ds-forwarder build ... --dry-run               # only print the Title ID and save folder
 3ds-forwarder build --from-cia game.cia --short-name "SMW"   # rebuild, same Title ID
 3ds-forwarder inspect game.cia [--extract DIR]  # what a game CIA contains (and its ROM)

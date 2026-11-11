@@ -5,6 +5,10 @@ Batocera's ROM folder names (``gb``, ``snes``, ``megadrive``...): they also
 name the game's save folder on the SD card, ``sdmc:/saves/<console>/<game>``.
 CD-based systems only take single-file ``.chd`` images (or ``.pbp`` for the
 PlayStation), so every game is exactly one file in the CIA.
+
+Each system also names its libretro database (``libretro``, e.g.
+``Nintendo - Game Boy``) and whether its games are identified against a
+No-Intro dat (cartridges, by CRC) or a Redump one (discs, by name).
 """
 
 from __future__ import annotations
@@ -31,6 +35,13 @@ class System:
     name: str
     core: str
     extensions: tuple[str, ...]
+    libretro: str = ""
+    database: str = "no-intro"
+
+    @property
+    def is_disc(self) -> bool:
+        """True for CD systems (Redump dats, identified by name, not by CRC)."""
+        return self.database == "redump"
 
     def accepts(self, rom: Path) -> bool:
         """True if ``rom``'s extension is one this console takes."""
@@ -55,6 +66,8 @@ class SystemCatalog:
                     name=data["name"],
                     core=data["core"],
                     extensions=tuple(ext.lower() for ext in data["extensions"]),
+                    libretro=data.get("libretro", ""),
+                    database=data.get("database", "no-intro"),
                 )
                 for console, data in raw.items()
             }
