@@ -38,9 +38,11 @@ from forwarder3ds.artwork.console_icons import icons_dir
 from forwarder3ds.artwork.steamgriddb import API_KEY_HELP_URL, SGDBClient
 from forwarder3ds.builder.toolchain import find_toolchain
 from forwarder3ds.core import catalog, paths
+from forwarder3ds.core.fonts import font_path
 from forwarder3ds.core.settings import DEFAULT_MANUFACTURER, Settings, ToolchainSettings
 from forwarder3ds.ctr.formats import BANNER_HEIGHT, BANNER_WIDTH
 from forwarder3ds.gui.bridge import TaskThread
+from forwarder3ds.gui.widgets.font_picker import FontPicker
 from forwarder3ds.gui.widgets.path_picker import PathPicker
 
 
@@ -312,16 +314,12 @@ class BannerPage(_Page):
         self.title = self.tr("Banner")
         self._background = _ColourButton(self.tr("Tag colour"))
         self._text = _ColourButton(self.tr("Banner text"))
-        self._font = PathPicker(
-            select_dir=False,
-            placeholder=self.tr("Built-in"),
-            file_filter=self.tr("Fonts (*.ttf *.otf)"),
-        )
+        self._font = FontPicker()
         self._preview = QLabel()
         self._preview.setFixedSize(BANNER_WIDTH * 2, BANNER_HEIGHT * 2)
         self._background.changed.connect(self._refresh)
         self._text.changed.connect(self._refresh)
-        self._font.edit.textChanged.connect(self._refresh)
+        self._font.changed.connect(self._refresh)
 
         icons = QPushButton(self.tr("Open"))
         icons.clicked.connect(lambda: MediaPage.open_folder(icons_dir()))
@@ -348,7 +346,9 @@ class BannerPage(_Page):
         form.addRow(self._preview)
 
     def _style(self) -> CardStyle:
-        return CardStyle(self._background.colour(), self._text.colour(), self._font.text())
+        return CardStyle(
+            self._background.colour(), self._text.colour(), font_path(self._font.choice())
+        )
 
     def _refresh(self) -> None:
         png = render_card_png(
@@ -361,14 +361,14 @@ class BannerPage(_Page):
     def load(self, settings: Settings) -> None:
         self._background.set_colour(settings.banner.background)
         self._text.set_colour(settings.banner.text)
-        self._font.set_text(settings.banner.font)
+        self._font.set_choice(settings.banner.font_choice)
         self._refresh()
 
     def store(self, settings: Settings) -> None:
         style = self._style()
         settings.banner.background = style.background
         settings.banner.text = style.text
-        settings.banner.font = style.font
+        settings.banner.font_choice = self._font.choice()
 
 
 class BottomScreenPage(_Page):
@@ -381,16 +381,12 @@ class BottomScreenPage(_Page):
         self._language = QComboBox()
         for code, name in LANGUAGE_NAMES.items():
             self._language.addItem(name, code)
-        self._font = PathPicker(
-            select_dir=False,
-            placeholder=self.tr("Built-in"),
-            file_filter=self.tr("Fonts (*.ttf *.otf)"),
-        )
+        self._font = FontPicker()
         self._preview = QLabel()
         self._preview.setFixedSize(320, 240)
         self._enabled.toggled.connect(self._refresh)
         self._language.currentIndexChanged.connect(self._refresh)
-        self._font.edit.textChanged.connect(self._refresh)
+        self._font.changed.connect(self._refresh)
 
         form = QFormLayout(self)
         form.addRow(self._enabled)
@@ -408,7 +404,9 @@ class BottomScreenPage(_Page):
         form.addRow(self._preview)
 
     def _style(self) -> BottomScreenStyle:
-        return BottomScreenStyle(self._language.currentData() or "en", self._font.text())
+        return BottomScreenStyle(
+            self._language.currentData() or "en", font_path(self._font.choice())
+        )
 
     def _refresh(self) -> None:
         enabled = self._enabled.isChecked()
@@ -424,14 +422,14 @@ class BottomScreenPage(_Page):
         self._enabled.setChecked(touch.enabled)
         index = self._language.findData(touch.language)
         self._language.setCurrentIndex(max(index, 0))
-        self._font.set_text(touch.font)
+        self._font.set_choice(touch.font_choice)
         self._refresh()
 
     def store(self, settings: Settings) -> None:
         style = self._style()
         settings.bottom_screen.enabled = self._enabled.isChecked()
         settings.bottom_screen.language = style.language
-        settings.bottom_screen.font = style.font
+        settings.bottom_screen.font_choice = self._font.choice()
 
 
 class SettingsDialog(QDialog):

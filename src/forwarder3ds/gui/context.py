@@ -27,6 +27,7 @@ from forwarder3ds.core.cores import DEFAULT_CORES_JSON, CoreCatalogError, CoreRe
 from forwarder3ds.core.logs import get_logger
 from forwarder3ds.core.names import save_folder_name
 from forwarder3ds.core.projects import Asset, BannerStyle, Project, ProjectStore
+from forwarder3ds.core.fonts import font_path, forget_fonts
 from forwarder3ds.core.settings import Settings, load_settings
 from forwarder3ds.core.systems import DEFAULT_SYSTEMS_JSON, SystemCatalog, SystemCatalogError
 from forwarder3ds.core.title_id import (
@@ -62,6 +63,7 @@ class AppContext:  # pylint: disable=too-many-instance-attributes
         """Re-read everything that depends on the settings."""
         self.tools = find_toolchain(self.settings.toolchain)
         self._core_options.clear()
+        forget_fonts()
         try:
             self.systems = SystemCatalog.load(DEFAULT_SYSTEMS_JSON)
         except SystemCatalogError as exc:
@@ -140,7 +142,7 @@ class AppContext:  # pylint: disable=too-many-instance-attributes
     def card_style(self) -> CardStyle:
         """The default banner's colours and font, from the settings."""
         banner = self.settings.banner
-        return CardStyle(banner.background, banner.text, banner.font)
+        return CardStyle(banner.background, banner.text, font_path(banner.font_choice))
 
     def render_card(self, project: Project) -> bytes:
         """``project``'s default banner (logo + console tag), as PNG data."""
@@ -180,14 +182,18 @@ class AppContext:  # pylint: disable=too-many-instance-attributes
             request.bottom_screen = self.bottom_screen_style(project.bottom_screen)
         return request
 
+    def touch_font(self) -> str:
+        """The file of the touch screen message's font (empty: built-in)."""
+        return font_path(self.settings.bottom_screen.font_choice)
+
     def bottom_screen_style(self, choice: str = CHOICE_DEFAULT) -> BottomScreenStyle | None:
         """The VC style touch screen for a project's ``choice`` (``None``: the emulator's own)."""
         touch = self.settings.bottom_screen
         language = choice_language(choice)
         if language is not None:
-            return BottomScreenStyle(language, touch.font)
+            return BottomScreenStyle(language, self.touch_font())
         if choice == CHOICE_DEFAULT and touch.enabled:
-            return BottomScreenStyle(touch.language, touch.font)
+            return BottomScreenStyle(touch.language, self.touch_font())
         return None
 
     def preview_unique_id(self, project: Project) -> tuple[int | None, str | None]:

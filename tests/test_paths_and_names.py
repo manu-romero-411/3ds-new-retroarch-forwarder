@@ -102,6 +102,9 @@ def test_settings_import_from_old_ui() -> None:
     settings = load_settings()
     assert settings.steamgriddb.api_key == "abc"
     assert settings.general.output_dir == "/tmp/out"
+    assert paths.config_file().is_file()  # imported once, then read from the new file
+    legacy.unlink()
+    assert load_settings().steamgriddb.api_key == "abc"
 
 
 def test_toolchain_from_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

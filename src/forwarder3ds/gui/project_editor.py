@@ -772,7 +772,7 @@ class ProjectEditor(QScrollArea):  # pylint: disable=too-many-instance-attribute
             standalone=self._context.is_standalone(project.core),
             menu_name=self._context.menu_name(project.core),
             default_touch=self._context.bottom_screen_style(),
-            touch_font=self._context.settings.bottom_screen.font,
+            touch_font=self._context.touch_font(),
             load_screenshot=self._screenshot_loader(),
         )
         bezel = project.asset(Asset.BEZEL)

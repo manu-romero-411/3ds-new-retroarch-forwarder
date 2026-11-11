@@ -49,6 +49,7 @@ from forwarder3ds.artwork.libretro import (
 from forwarder3ds.core.names import suggest_title
 from forwarder3ds.core.romdb import Identification, MatchKind, identify
 from forwarder3ds.core.systems import System
+from forwarder3ds.core.fonts import font_path
 from forwarder3ds.core.settings import Settings, load_settings, masked
 from forwarder3ds.core.title_id import unique_id_to_title_id
 from forwarder3ds.ctr.cia import CiaReadError, LoadedGame, read_game_cia
@@ -146,7 +147,7 @@ def _images(  # pylint: disable=too-many-arguments,too-many-positional-arguments
             name=args.banner_name or "",
             year=card.year,
             logo=logo,
-            style=CardStyle(banner.background, banner.text, banner.font),
+            style=CardStyle(banner.background, banner.text, font_path(banner.font_choice)),
             icon=args.tag_icon,
         )
     images.banner = images.banner or loaded_assets.banner
@@ -269,7 +270,7 @@ def _bottom_screen(args: argparse.Namespace, settings: Settings) -> BottomScreen
     touch = settings.bottom_screen
     if args.no_touch_screen or not touch.enabled:
         return None
-    return BottomScreenStyle(args.touch_language or touch.language, touch.font)
+    return BottomScreenStyle(args.touch_language or touch.language, font_path(touch.font_choice))
 
 
 def _describe_screen(screen: ScreenSettings | None) -> str:

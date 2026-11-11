@@ -32,8 +32,8 @@ RetroArch installed and never touches `sdmc:/retroarch`.
   in English, Japanese, French, German, Italian, Spanish, Dutch, Portuguese
   or Russian (Settings › Touch screen, `--touch-language`). Each project
   can pick another language, an image of its own (`--touch-image`) or the
-  emulator's own screen. Nintendo's font is FOT-Rodin: it is not included,
-  point the setting to your copy.
+  emulator's own screen. Nintendo's font is FOT-Rodin: it is not included;
+  pick it from the system's fonts (or straight from its file) in the settings.
 - The injection options **preview both screens**: the game (libretro's
   screenshot, when the ROM is matched) scaled as the screen mode says, the
   bezel and the touch screen picture.

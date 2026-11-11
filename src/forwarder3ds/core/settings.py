@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from forwarder3ds.core import paths
+from forwarder3ds.core.fonts import FontChoice
 from forwarder3ds.core.logs import get_logger
 
 _log = get_logger("settings")
@@ -70,25 +71,40 @@ class ToolchainSettings:
 
 
 @dataclass
-class BannerSettings:
+class _FontSettings:
+    """A font picked by name, with its file (see :mod:`forwarder3ds.core.fonts`)."""
+
+    #: A TTF/OTF file picked directly; empty when picked by name or built-in.
+    font: str = ""
+    font_family: str = ""
+    font_style: str = ""
+
+    @property
+    def font_choice(self) -> FontChoice:
+        """The font as picked."""
+        return FontChoice(self.font_family, self.font_style, self.font)
+
+    @font_choice.setter
+    def font_choice(self, choice: FontChoice) -> None:
+        self.font_family, self.font_style, self.font = choice.family, choice.style, choice.file
+
+
+@dataclass
+class BannerSettings(_FontSettings):
     """Look of the default banner (logo + console tag), the same for every game."""
 
     background: str = "#1e1e22"
     text: str = "#ffffff"
-    #: A TTF/OTF file; empty for the built-in font.
-    font: str = ""
 
 
 @dataclass
-class BottomScreenSettings:
+class BottomScreenSettings(_FontSettings):
     """The touch screen shown while a game runs (Virtual Console style)."""
 
     #: Draw it; off leaves the emulator's own idle screen.
     enabled: bool = True
     #: Language of the message (a code of ``artwork.bottom_screen.MESSAGES``).
     language: str = "en"
-    #: A TTF/OTF file (Nintendo's is FOT-Rodin); empty for the built-in font.
-    font: str = ""
 
 
 @dataclass
@@ -164,7 +180,14 @@ def load_settings(path: Path | None = None) -> Settings:
     """Read settings, importing the old UI's ones on first run."""
     path = path or paths.config_file()
     if not path.is_file():
-        return _migrate_legacy(legacy_settings_file()) or Settings()
+        migrated = _migrate_legacy(legacy_settings_file())
+        if migrated is None:
+            return Settings()
+        try:  # once: the next start reads the new file
+            save_settings(migrated, path)
+        except OSError as exc:
+            _log.warning("Cannot save the imported settings to %s: %s", path, exc)
+        return migrated
     parser = configparser.ConfigParser(interpolation=None)
     try:
         parser.read(path, encoding="utf-8")
