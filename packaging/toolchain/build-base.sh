@@ -34,6 +34,12 @@ if [[ "${RA_LEAN:-1}" == 1 ]]; then
         HAVE_IFINFO=0 HAVE_BUILTINMBEDTLS=0)
 fi
 readonly -a RA_MAKE_FLAGS
+# devkitARM's GCC (16.x) defaults to C23 and turns old warnings into errors
+# (e.g. int* passed as int32_t*, which is long* on ARM newlib). Cores predate
+# that, so they build as gnu17 with those errors back to warnings. Passed in
+# the environment: libretro makefiles add their own flags with "CFLAGS +=".
+readonly CORE_COMPAT_CFLAGS="-std=gnu17 -Wno-error=incompatible-pointer-types \
+-Wno-error=int-conversion -Wno-error=implicit-function-declaration -Wno-error=implicit-int"
 
 log() {
     local tag="$1"
@@ -112,7 +118,7 @@ ra_make_var() {
 
 build_core() {
     local work="$1" recipe="$2" out_dir="$3" ra_dir="$1/RetroArch"
-    local CORE_NAME CORE_REPO CORE_REF CORE_SUBDIR CORE_MAKEFILE CORE_LIB
+    local CORE_NAME CORE_REPO CORE_REF CORE_SUBDIR CORE_MAKEFILE CORE_LIB CORE_CFLAGS=""
     # shellcheck source=retroarch/cores/gambatte.env
     source "${recipe}"
     local core_dir="${work}/cores/${CORE_NAME}" dest="${out_dir}/bases/${CORE_NAME}"
@@ -121,7 +127,8 @@ build_core() {
 
     log "[INFO]" "Building core ${CORE_NAME} (${CORE_REF})"
     checkout "${CORE_REPO}" "${CORE_REF}" "${core_dir}"
-    make -C "${core_dir}/${CORE_SUBDIR}" -f "${CORE_MAKEFILE}" platform=ctr -j"${jobs}" > /dev/null
+    CFLAGS="${CORE_COMPAT_CFLAGS} ${CORE_CFLAGS}" \
+        make -C "${core_dir}/${CORE_SUBDIR}" -f "${CORE_MAKEFILE}" platform=ctr -j"${jobs}" > /dev/null
     install -m 0644 "${core_dir}/${CORE_SUBDIR}/${CORE_LIB}" "${ra_dir}/libretro_ctr.a"
 
     log "[INFO]" "Linking RetroArch ${RETROARCH_REF} with ${CORE_NAME}"
