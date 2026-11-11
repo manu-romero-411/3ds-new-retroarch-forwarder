@@ -77,7 +77,7 @@ class InjectionOptionsDialog(QDialog):  # pylint: disable=too-many-instance-attr
         self._modes = QButtonGroup(self)
         self._radios: dict[ScreenMode, QRadioButton] = {}
         texts = {
-            ScreenMode.PIXEL_PERFECT: self.tr("Pixel perfect (integer scale)"),
+            ScreenMode.PIXEL_PERFECT: self.tr("Pixel perfect (square pixels, integer scale)"),
             ScreenMode.RECOMMENDED: self.tr("Recommended (as large as fits, core aspect ratio)"),
             ScreenMode.FULL: self.tr("Full screen (stretched to 400×240)"),
             ScreenMode.CUSTOM: self.tr("Custom:"),

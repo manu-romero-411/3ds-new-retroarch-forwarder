@@ -27,7 +27,7 @@ RetroArch installed and never touches `sdmc:/retroarch`.
 - An optional **bezel** over the top screen (`--bezel`, 400x240 with a
   transparent window: a 4:3 game is the middle 320x240), replaceable per
   game by dropping a `bezel.png` in its save folder.
-- A trimmed pause menu: the touch screen shows RetroArch's 3DS menu
+- A trimmed pause menu (black theme, A confirms): the touch screen shows RetroArch's 3DS menu
   (resume, save state, load state) and the Quick Menu keeps only what makes
   sense for one game. CD games are single `.chd` files.
 - ROMs are **identified against the libretro database** (No-Intro dats by

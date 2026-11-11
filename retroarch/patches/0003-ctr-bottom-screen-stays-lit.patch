@@ -1,0 +1,40 @@
+ctr: keep the touch screen lit
+
+The 3DS driver dims the bottom screen a few seconds after the last touch
+and then turns its backlight off. Rosalina draws its menu on that screen,
+so it opened in the dark. Leave the idle dimming out unless the build
+defines HAVE_CTR_BOTTOM_IDLE.
+
+Applies on top of 0002, to RetroArch v1.22.2 (RETROARCH_REF in versions.env).
+
+--- a/gfx/drivers/ctr_gfx.c
++++ b/gfx/drivers/ctr_gfx.c
+@@ -1601,6 +1601,9 @@
+ #endif
+ }
+ 
++/* Dimming the touch screen when idle is left out by default: once dimmed
++ * it also darkens Rosalina's menu, which is drawn on it. */
++#ifdef HAVE_CTR_BOTTOM_IDLE
+ static void ctr_set_bottom_screen_idle(ctr_video_t * ctr)
+ {
+    u64 elapsed_tick;
+@@ -1635,6 +1638,7 @@
+       }
+    }
+ }
++#endif
+ 
+ static void ctr_set_bottom_screen_enable(bool enabled, bool idle)
+ {
+@@ -2399,8 +2403,10 @@
+       if (!ctr->bottom_is_idle)
+       {
+          ctr_render_bottom_screen(ctr);
++#ifdef HAVE_CTR_BOTTOM_IDLE
+          if (ctr->bottom_check_idle)
+             ctr_set_bottom_screen_idle(ctr);
++#endif
+       }
+    }
+ #endif

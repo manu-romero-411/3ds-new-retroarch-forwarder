@@ -20,6 +20,7 @@ SCREEN_WIDTH = 400
 SCREEN_HEIGHT = 240
 
 # RetroArch v1.22.2 ``enum aspect_ratio`` (gfx/video_defines.h).
+_ASPECT_SQUARE = 21
 _ASPECT_CORE = 22
 _ASPECT_CUSTOM = 23
 _ASPECT_FULL = 24
@@ -28,7 +29,8 @@ _ASPECT_FULL = 24
 class ScreenMode(str, Enum):
     """How the game's picture is scaled on the top screen."""
 
-    #: Integer scale of the core's picture: sharp, smaller.
+    #: Square pixels at an integer scale: exactly the console's pixels,
+    #: never resampled (a 320x224 game stays 320x224, centred).
     PIXEL_PERFECT = "pixel_perfect"
     #: As large as it fits, keeping the core's aspect ratio.
     RECOMMENDED = "recommended"
@@ -54,7 +56,11 @@ class ScreenSettings:
             "video_smooth": _bool(self.smooth),
             "video_scale_integer": _bool(self.mode is ScreenMode.PIXEL_PERFECT),
         }
-        if self.mode is ScreenMode.FULL:
+        if self.mode is ScreenMode.PIXEL_PERFECT:
+            # The core's aspect (4:3 for most) would scale columns by a
+            # fraction, leaving uneven pixels: square ones keep them whole.
+            lines["aspect_ratio_index"] = str(_ASPECT_SQUARE)
+        elif self.mode is ScreenMode.FULL:
             lines["aspect_ratio_index"] = str(_ASPECT_FULL)
         elif self.mode is ScreenMode.CUSTOM:
             width = max(1, min(self.width, SCREEN_WIDTH))

@@ -40,6 +40,8 @@ Written against the RetroArch release in `RETROARCH_REF`; bump both together.
   screen overlay; with none, overlays are turned off.
 - `0002-ctr-bottom-menu-null-texture.patch`: fixes a crash of RetroArch's
   touch screen menu when `bottom_menu.png` is missing (upstream bug).
+- `0003-ctr-bottom-screen-stays-lit.patch`: the touch screen no longer dims
+  and switches off when idle (it left Rosalina's menu in the dark).
 
 ## Core recipes
 

@@ -7,7 +7,7 @@ linked with one core and patched for single-game mode, see
 * a flat RomFS holding the ROM as ``game.<ext>``, ``manifest.cfg`` (where
   the game keeps its data on the SD card, plus the fields needed to read
   the CIA back), the seed ``retroarch.cfg`` (with the game's screen
-  settings), the touch screen asset and, optionally, a top screen bezel
+  settings), the menu's colour theme, the touch screen asset and, optionally, a top screen bezel
   (``bezel.png`` + its overlay ``bezel.cfg``), initial core options
   (``game.opt``) and a control remap (``game.rmp``);
 * an SMDH icon and a banner made by ``bannertool``;
@@ -79,6 +79,8 @@ BIOS_DIR = f"{SAVES_ROOT}/bios"
 CONTENT_STEM = "game"
 MANIFEST_FILE = "manifest.cfg"
 SEED_CONFIG_FILE = "retroarch.cfg"
+#: The menu's colour theme, referenced by the seed config.
+MENU_THEME_FILE = "rgui_theme.cfg"
 BOTTOM_MENU_FILE = "bottom_menu.png"
 BEZEL_FILE = "bezel.png"
 BEZEL_OVERLAY_FILE = "bezel.cfg"
@@ -316,6 +318,7 @@ def write_romfs(directory: Path, request: GameRequest, base: Base) -> Path:
         raise BuildError(f"Cannot read {request.rom}: {exc}") from exc
     (romfs / MANIFEST_FILE).write_text(manifest_text(request), encoding="utf-8")
     (romfs / SEED_CONFIG_FILE).write_text(seed_config_text(request), encoding="utf-8")
+    shutil.copyfile(bundled(MENU_THEME_FILE), romfs / MENU_THEME_FILE)
     if base.bottom_menu is not None:
         shutil.copyfile(base.bottom_menu, romfs / BOTTOM_MENU_FILE)
     else:

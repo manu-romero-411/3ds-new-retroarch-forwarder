@@ -89,7 +89,10 @@ def test_core_options_v1() -> None:
 @pytest.mark.parametrize(
     ("screen", "expected"),
     [
-        (ScreenSettings(ScreenMode.PIXEL_PERFECT), {"video_scale_integer": "true"}),
+        (
+            ScreenSettings(ScreenMode.PIXEL_PERFECT),
+            {"video_scale_integer": "true", "aspect_ratio_index": "21"},
+        ),
         (ScreenSettings(ScreenMode.FULL, smooth=True), {"aspect_ratio_index": "24"}),
         (
             ScreenSettings(ScreenMode.CUSTOM, 360, 240),
@@ -134,6 +137,8 @@ def test_romfs_seeds_settings(tmp_path: Path) -> None:
     config = (romfs / "retroarch.cfg").read_text(encoding="utf-8")
     assert 'aspect_ratio_index = "24"' in config
     assert 'menu_swap_ok_cancel_buttons = "false"' in config
+    assert 'rgui_menu_theme_preset = "romfs:/rgui_theme.cfg"' in config
+    assert "rgui_bg_dark_color" in (romfs / "rgui_theme.cfg").read_text(encoding="utf-8")
     options = (romfs / "game.opt").read_text(encoding="utf-8")
     assert options == 'gambatte_gb_colorization = "auto"\n'
     assert (romfs / "game.rmp").read_text(encoding="utf-8") == 'input_player1_btn_a = "0"\n'
