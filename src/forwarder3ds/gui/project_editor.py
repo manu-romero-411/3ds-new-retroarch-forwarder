@@ -48,6 +48,7 @@ from PySide6.QtWidgets import (
 from forwarder3ds.artwork.compositor import compose_banner_png_bytes
 from forwarder3ds.artwork.libretro import ThumbnailKind, fetch_thumbnail
 from forwarder3ds.artwork.steamgriddb import AssetKind
+from forwarder3ds.builder.injector import is_model_banner
 from forwarder3ds.core.catalog import JINGLE_RULES, list_jingles, validate_jingle
 from forwarder3ds.core.game_config import ScreenMode
 from forwarder3ds.core.logs import get_logger
@@ -75,6 +76,9 @@ _SAVE_DELAY_MS = 400
 _ICON_PREVIEW = 96
 _BANNER_PREVIEW = (384, 192)
 IMAGE_FILE_FILTER = "Images (*.png *.jpg *.jpeg *.bmp *.webp);;All files (*)"
+BANNER_FILE_FILTER = (
+    "Images or 3D banner models (*.png *.jpg *.jpeg *.bmp *.webp *.cgfx);;All files (*)"
+)
 _THUMBNAILS = {
     BannerStyle.TITLE_SCREEN: ThumbnailKind.TITLE,
     BannerStyle.SNAPSHOT: ThumbnailKind.SNAP,
@@ -460,8 +464,8 @@ class ProjectEditor(QScrollArea):  # pylint: disable=too-many-instance-attribute
             self._show_banner()
         self.save()
 
-    def _pick_file(self, title: str) -> Path | None:
-        path, _filter = QFileDialog.getOpenFileName(self, title, "", IMAGE_FILE_FILTER)
+    def _pick_file(self, title: str, file_filter: str = IMAGE_FILE_FILTER) -> Path | None:
+        path, _filter = QFileDialog.getOpenFileName(self, title, "", file_filter)
         return Path(path) if path else None
 
     def _icon_from_file(self) -> None:
@@ -497,7 +501,12 @@ class ProjectEditor(QScrollArea):  # pylint: disable=too-many-instance-attribute
             self._icon.setPixmap(pixmap)
 
     def _show_banner(self) -> None:
-        pixmap = self._pixmap(self._project.asset(Asset.BANNER), *_BANNER_PREVIEW)
+        banner = self._project.asset(Asset.BANNER)
+        if is_model_banner(banner):
+            self._banner.clear()
+            self._banner.setText(self.tr("3D banner model (CGFX)"))
+            return
+        pixmap = self._pixmap(banner, *_BANNER_PREVIEW)
         if pixmap is None:
             self._banner.clear()
             self._banner.setText(self.tr("Default banner"))
@@ -515,7 +524,7 @@ class ProjectEditor(QScrollArea):  # pylint: disable=too-many-instance-attribute
             self._download_banner()
 
     def _banner_from_file(self) -> None:
-        path = self._pick_file(self.tr("Choose the banner image"))
+        path = self._pick_file(self.tr("Choose the banner image or model"), BANNER_FILE_FILTER)
         if path is None:
             return
         self._banner_source.setText(self.tr("File · {name}").format(name=path.name))

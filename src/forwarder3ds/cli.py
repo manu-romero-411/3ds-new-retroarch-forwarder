@@ -509,7 +509,11 @@ def _add_build_parser(sub: argparse._SubParsersAction) -> None:
     art.add_argument("--icon", type=Path, help="icon image, any size (stretched to 48x48)")
     art.add_argument("--hero", type=Path, help="banner background (cover-cropped)")
     art.add_argument("--logo", type=Path, help="game logo pasted over the hero")
-    art.add_argument("--banner", type=Path, help="ready-made banner (replaces hero + logo)")
+    art.add_argument(
+        "--banner",
+        type=Path,
+        help="ready-made banner (replaces hero + logo): an image, or a .cgfx 3D model",
+    )
     art.add_argument("--platform-logo", help="frame drawn over the banner: catalog name or PNG")
     bezel = art.add_mutually_exclusive_group()
     bezel.add_argument(

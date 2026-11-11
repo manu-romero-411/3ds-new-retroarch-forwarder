@@ -1,6 +1,6 @@
 """The library, a project tab and the option dialogs, off-screen."""
 
-# pylint: disable=missing-function-docstring,protected-access
+# pylint: disable=missing-function-docstring,protected-access,no-member
 
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ pytest.importorskip("PySide6.QtWidgets")
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 # pylint: disable=wrong-import-position
+import shiboken6  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from forwarder3ds.core.game_config import ScreenMode, ScreenSettings  # noqa: E402
@@ -78,6 +79,7 @@ def test_project_tab_follows_the_database(
     assert context.problem(stored) is not None  # no base built here
     window._close_tab(1)
     window.close()
+    shiboken6.delete(window)  # not at interpreter exit, where Qt may crash
 
 
 def test_option_dialogs_round_trip(app: QApplication) -> None:
@@ -92,3 +94,5 @@ def test_option_dialogs_round_trip(app: QApplication) -> None:
     game = GameContext("snes", "Super Nintendo", "snes9x2005", None)
     dialog = InjectionOptionsDialog(None, game, options)
     assert dialog.options() == options
+    shiboken6.delete(dialog)
+    shiboken6.delete(mapping)
