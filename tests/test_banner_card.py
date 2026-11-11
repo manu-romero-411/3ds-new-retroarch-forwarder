@@ -51,7 +51,10 @@ def test_icons(tmp_path: Path) -> None:
     custom = tmp_path / "pad.png"
     Image.new("RGBA", (5, 5), (1, 2, 3, 255)).save(custom)
     assert console_icons.load_icon("snes", custom).size == (5, 5)
-    assert console_icons.load_icon("snes", tmp_path / "missing.png").size == (18, 8)
+    assert console_icons.load_icon("snes", tmp_path / "missing.png").size == (32, 32)
+    pad = Image.new("RGBA", (32, 32), (0, 0, 0, 0))
+    pad.paste((9, 9, 9, 255), (2, 10, 30, 22))
+    assert console_icons.fit_icon(pad, 26).size == (56, 24)  # margin cropped, whole steps
     assert console_icons.fit_icon(Image.new("RGBA", (11, 13)), 26).size == (22, 26)
     assert console_icons.fit_icon(Image.new("RGBA", (200, 100)), 26).size == (52, 26)
     card = render_card(console="snes", title="X", year="1990", icon=custom)

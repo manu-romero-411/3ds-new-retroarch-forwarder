@@ -263,3 +263,8 @@ python3 scripts/parse_retroarch_cores.py <RetroArch>/pkg/ctr/Makefile.cores > sr
 GPL-3.0-only. The bundled `makerom` and `bannertool` are MIT-licensed; their
 licences are installed with them. RetroArch is GPL-3.0; each core keeps its
 own licence (some, such as snes9x, are non-commercial).
+
+## Credits
+
+- Console icons on the default banner: [Console Icon Pack](https://benjelter.itch.io/console-icon-pack)
+  by BenJelter (see [`console_icons/CREDITS.md`](src/forwarder3ds/data/console_icons/CREDITS.md)).

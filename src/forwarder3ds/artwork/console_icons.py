@@ -46,7 +46,10 @@ def load_icon(console: str, custom: Path | None = None) -> Image.Image:
 
 
 def fit_icon(icon: Image.Image, height: int) -> Image.Image:
-    """``icon`` scaled to at most ``height`` pixels tall."""
+    """``icon`` without its transparent margin, scaled to at most ``height`` pixels tall."""
+    box = icon.getchannel("A").getbbox() if icon.mode == "RGBA" else None
+    if box is not None:
+        icon = icon.crop(box)
     if icon.height <= height:
         factor = max(1, height // icon.height)
         return icon.resize((icon.width * factor, icon.height * factor), Image.Resampling.NEAREST)
