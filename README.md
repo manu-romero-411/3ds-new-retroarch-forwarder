@@ -34,6 +34,8 @@ RetroArch installed and never touches `sdmc:/retroarch`.
   fill the CIA's names, and libretro's title screen and snapshot can be
   used as the banner background. Hacks, translations or other revisions are
   flagged and can be matched by hand.
+- ROMs can stay zipped, as No-Intro sets come: the zip's ROM is identified
+  by the CRC the zip stores and packed uncompressed into the CIA.
 - Artwork comes from **SteamGridDB** (icon, hero and logo; the banner is the
   hero with the logo on top), or from your own image files.
 - Existing CIAs can be opened, edited and rebuilt under the same Title ID,

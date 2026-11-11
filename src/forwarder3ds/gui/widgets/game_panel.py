@@ -315,6 +315,7 @@ class GamePanel(QWidget):  # pylint: disable=too-many-instance-attributes
 
     def _browse_rom(self) -> None:
         extensions = sorted({ext for system in self._systems or [] for ext in system.extensions})
+        extensions.append("zip")
         roms = " ".join(f"*.{ext}" for ext in extensions)
         path, _filter = QFileDialog.getOpenFileName(
             self,

@@ -6,7 +6,8 @@ side dats keyed by CRC with the publisher, developer and release year.
 This module parses those clrmamepro-format files and matches a ROM:
 
 * **cartridges** by CRC32 of the file -- also without a copier/iNES/fwNES
-  header, so headered and headerless dumps both match;
+  header, so headered and headerless dumps both match. A zipped ROM uses
+  the CRC32 the zip stores for it;
 * **discs** (``.chd``/``.pbp``) by name: hashing a CHD's tracks is not
   practical, so the file name is compared with the dat's game names. Such a
   match is only a guess and is reported as such.
@@ -21,11 +22,15 @@ from __future__ import annotations
 
 import enum
 import re
+import zipfile
 import zlib
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import BinaryIO
 
+from forwarder3ds.core.archives import ArchiveError, is_archive, rom_member
 from forwarder3ds.core.names import database_title, strip_tags
 from forwarder3ds.core.systems import System
 
@@ -235,25 +240,48 @@ class GameDatabase:
 # ── Identification ───────────────────────────────────────────────────────
 
 
-def _crc32(path: Path, skip: int = 0) -> int:
+def _crc32(handle: BinaryIO, skip: int) -> int:
+    """CRC32 of what ``handle`` holds past its first ``skip`` bytes."""
+    handle.read(skip)
     crc = 0
-    with path.open("rb") as handle:
-        handle.seek(skip)
-        while chunk := handle.read(_CHUNK):
-            crc = zlib.crc32(chunk, crc)
+    while chunk := handle.read(_CHUNK):
+        crc = zlib.crc32(chunk, crc)
     return crc & 0xFFFFFFFF
 
 
-def rom_crcs(path: Path) -> list[int]:
-    """CRC32 of the file, then of its data without a known header if it has one."""
-    crcs = [_crc32(path)]
-    size = path.stat().st_size
-    with path.open("rb") as handle:
+@contextmanager
+def _open_rom(path: Path, member: zipfile.ZipInfo | None) -> Iterator[BinaryIO]:
+    """The ROM's bytes: ``path`` itself, or ``member`` of the zip ``path``."""
+    if member is None:
+        with path.open("rb") as handle:
+            yield handle
+    else:
+        with zipfile.ZipFile(path) as archive, archive.open(member) as handle:
+            yield handle
+
+
+def rom_crcs(path: Path, extensions: Iterable[str] = ()) -> list[int]:
+    """CRC32 of the ROM, then of its data without a known header if it has one.
+
+    For a ``.zip``, the ROM is its one member of a type in ``extensions``.
+    Raises :class:`~forwarder3ds.core.archives.ArchiveError` for a bad archive.
+    """
+    member = rom_member(path, extensions) if is_archive(path) else None
+    with _open_rom(path, member) as handle:
         magic = handle.read(4)
+    if member is not None:  # the zip already knows the CRC of the whole ROM
+        size, crcs = member.file_size, [member.CRC]
+    else:
+        with _open_rom(path, member) as handle:
+            size, crcs = path.stat().st_size, [_crc32(handle, 0)]
+    skips = []
     if magic in (_INES_MAGIC, _FWNES_MAGIC) and size > _NES_HEADER:
-        crcs.append(_crc32(path, _NES_HEADER))
+        skips.append(_NES_HEADER)
     if size % 1024 == _SNES_COPIER_HEADER:
-        crcs.append(_crc32(path, _SNES_COPIER_HEADER))
+        skips.append(_SNES_COPIER_HEADER)
+    for skip in skips:
+        with _open_rom(path, member) as handle:
+            crcs.append(_crc32(handle, skip))
     return crcs
 
 
@@ -265,7 +293,10 @@ def identify(path: Path, system: System, database: GameDatabase) -> Identificati
             return Identification(MatchKind.NONE)
         return Identification(MatchKind.NAME, candidates[0], candidates=tuple(candidates))
 
-    crcs = rom_crcs(path)
+    try:
+        crcs = rom_crcs(path, system.extensions)
+    except ArchiveError:
+        return Identification(MatchKind.NONE)
     for crc in crcs:
         game = database.by_crc(crc)
         if game is not None:

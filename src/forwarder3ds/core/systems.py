@@ -18,6 +18,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
+from forwarder3ds.core.archives import ArchiveError, is_archive, rom_member
 from forwarder3ds.core.paths import bundled
 
 DEFAULT_SYSTEMS_JSON = bundled("systems.json")
@@ -44,7 +45,13 @@ class System:
         return self.database == "redump"
 
     def accepts(self, rom: Path) -> bool:
-        """True if ``rom``'s extension is one this console takes."""
+        """True if ``rom`` (or the one ROM inside a ``.zip``) is of a type this console takes."""
+        if is_archive(rom):
+            try:
+                rom_member(rom, self.extensions)
+            except ArchiveError:
+                return False
+            return True
         return rom.suffix.lower().lstrip(".") in self.extensions
 
 

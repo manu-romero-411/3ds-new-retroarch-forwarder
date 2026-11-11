@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import zipfile
 import zlib
 from pathlib import Path
 
@@ -11,6 +12,9 @@ import pytest
 
 from forwarder3ds.artwork.libretro import ThumbnailKind, thumbnail_url
 from forwarder3ds import cli
+from forwarder3ds.builder.errors import BuildError
+from forwarder3ds.builder.injector import make_request, manifest_text, write_romfs
+from forwarder3ds.builder.toolchain import Base
 from forwarder3ds.core.names import database_title
 from forwarder3ds.core.romdb import GameDatabase, MatchKind, identify, parse_dat, rom_crcs
 from forwarder3ds.core.systems import SystemCatalog
@@ -106,6 +110,38 @@ def test_identify_cartridge(tmp_path: Path, database: GameDatabase, systems: Sys
     hack.write_bytes(ROM_DATA + b"!")
     found = identify(hack, systems.require("gb"), database)
     assert found.kind is MatchKind.NONE and not found.matched
+
+
+def test_identify_zipped_rom(
+    tmp_path: Path, database: GameDatabase, systems: SystemCatalog
+) -> None:
+    archive = tmp_path / "Tetris (World) (Rev 1).zip"
+    with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as zipped:
+        zipped.writestr("Tetris (World) (Rev 1).gb", ROM_DATA)
+        zipped.writestr("readme.txt", "hello")
+    assert systems.guess(archive) == systems.require("gb")
+    found = identify(archive, systems.require("gb"), database)
+    assert found.kind is MatchKind.CRC and found.crc == ROM_CRC
+
+    request = make_request(rom=archive, long_name="Tetris", output=tmp_path / "t.cia")
+    assert (request.console, request.rom_name, request.content_name) == (
+        "gb",
+        "Tetris (World) (Rev 1).gb",
+        "game.gb",
+    )
+    base = Base("gambatte", tmp_path / "x.elf", "64MB", "Legacy", False, None, {})
+    romfs = write_romfs(tmp_path / "scratch", request, base)
+    assert (romfs / "game.gb").read_bytes() == ROM_DATA
+    assert 'rom_name = "Tetris (World) (Rev 1).gb"' in manifest_text(request)
+
+
+def test_zip_with_several_roms_is_rejected(tmp_path: Path) -> None:
+    archive = tmp_path / "two.zip"
+    with zipfile.ZipFile(archive, "w") as zipped:
+        zipped.writestr("a.gb", b"a")
+        zipped.writestr("b.gb", b"b")
+    with pytest.raises(BuildError, match="several ROMs"):
+        make_request(rom=archive, long_name="Two", output=tmp_path / "t.cia", console="gb")
 
 
 def test_headers_are_skipped(tmp_path: Path) -> None:

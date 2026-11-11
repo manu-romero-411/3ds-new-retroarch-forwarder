@@ -41,6 +41,7 @@ from forwarder3ds.builder.media import (
 )
 from forwarder3ds.builder.placeholders import ensure_placeholder_assets
 from forwarder3ds.builder.toolchain import Base, Toolchain, run_tool
+from forwarder3ds.core.archives import ArchiveError, extract, inner_name, is_archive
 from forwarder3ds.core.catalog import validate_platform_logo
 from forwarder3ds.core.cores import DEFAULT_CORES_JSON, CoreCatalogError, CoreRegistry
 from forwarder3ds.core.logs import get_logger, log_success
@@ -107,6 +108,8 @@ class GameRequest:  # pylint: disable=too-many-instance-attributes
     platform_logo: Path | None = None
     #: Top screen bezel (any image; scaled to 400x240, transparency kept).
     bezel: Path | None = None
+    #: The ROM's own file name; for a ``.zip``, the name of the ROM inside it.
+    rom_name: str = ""
     manual_unique_id: int | None = None
     #: Set when rebuilding a CIA loaded from disk under its original Title
     #: ID: lets ``manual_unique_id`` take over an ID that the registry still
@@ -121,7 +124,7 @@ class GameRequest:  # pylint: disable=too-many-instance-attributes
     @property
     def content_name(self) -> str:
         """The ROM's name inside the RomFS: ``game`` plus its extension, lowercase."""
-        return CONTENT_STEM + self.rom.suffix.lower()
+        return CONTENT_STEM + Path(self.rom_name or self.rom.name).suffix.lower()
 
     def identity(self) -> GameIdentity:
         """The fields the Title ID is derived from."""
@@ -205,6 +208,11 @@ def validate_request(request: GameRequest, cores: CoreRegistry, systems: SystemC
         raise BuildError(str(exc)) from exc
     if not request.rom.is_file():
         raise BuildError(f"The ROM does not exist: {request.rom}")
+    if is_archive(request.rom):
+        try:
+            inner_name(request.rom, systems.require(request.console).extensions)
+        except ArchiveError as exc:
+            raise BuildError(str(exc)) from exc
     if not request.folder or save_folder_name(request.folder) != request.folder:
         raise BuildError(f"Invalid save folder name: '{request.folder}'.")
     if not request.long_name:
@@ -261,7 +269,7 @@ def manifest_text(request: GameRequest) -> str:
         "core": request.core,
         "console": request.console,
         "game": request.folder,
-        "rom_name": request.rom.name,
+        "rom_name": request.rom_name or request.rom.name,
     }
     lines = ["# Single-game CIA (retroarch/patches/0001-ctr-single-game-mode.patch)."]
     lines += [f"{key} = {_quote(value)}" for key, value in entries.items()]
@@ -280,8 +288,12 @@ def write_romfs(directory: Path, request: GameRequest, base: Base) -> Path:
     romfs = directory / "romfs"
     romfs.mkdir(parents=True, exist_ok=True)
     try:
-        shutil.copyfile(request.rom, romfs / request.content_name)
-    except OSError as exc:
+        if is_archive(request.rom):  # pack the ROM itself: nothing to extract on the console
+            extensions = load_systems().require(request.console).extensions
+            extract(request.rom, extensions, romfs / request.content_name)
+        else:
+            shutil.copyfile(request.rom, romfs / request.content_name)
+    except (OSError, ArchiveError, SystemCatalogError) as exc:
         raise BuildError(f"Cannot read {request.rom}: {exc}") from exc
     (romfs / MANIFEST_FILE).write_text(manifest_text(request), encoding="utf-8")
     (romfs / SEED_CONFIG_FILE).write_text(seed_config_text(request), encoding="utf-8")
@@ -436,8 +448,9 @@ def make_request(  # pylint: disable=too-many-arguments
 ) -> GameRequest:
     """A :class:`GameRequest` with the usual defaults filled in.
 
-    * ``console``: guessed from the ROM's extension when it points to one
-      console only (``.chd`` does not: CD systems need it given);
+    * ``console``: guessed from the ROM's extension (for a ``.zip``, from the
+      ROM inside) when it points to one console only (``.chd`` does not: CD
+      systems need it given);
     * ``core``: the console's default core;
     * ``folder``: the long name, made safe for the SD card;
     * the internal name (part of the Title ID hash) and the short name
@@ -457,9 +470,16 @@ def make_request(  # pylint: disable=too-many-arguments
                 f"give it explicitly{f' ({options})' if options else ''}."
             )
         console = guessed.console
+    system = systems.get(console)
     if not core.strip():
-        system = systems.get(console)
         core = system.core if system else ""
+    rom_name = rom.name
+    if system is not None and is_archive(rom):
+        try:
+            rom_name = inner_name(rom, system.extensions)
+        except ArchiveError as exc:
+            raise BuildError(str(exc)) from exc
+    extra.setdefault("rom_name", rom_name)
     return GameRequest(
         core=core.strip(),
         rom=rom,
