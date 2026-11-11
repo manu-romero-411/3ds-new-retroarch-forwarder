@@ -218,10 +218,11 @@ def load_registry(path: Path) -> TitleIdRegistry:
 def validate_request(request: GameRequest, cores: CoreRegistry, systems: SystemCatalog) -> None:
     """Raise :class:`BuildError` if ``request`` cannot be built."""
     if not request.core:
-        raise BuildError("No RetroArch core given.")
+        raise BuildError("No core given.")
     try:
-        cores.require(request.core)
-        systems.require(request.console)
+        system = systems.require(request.console)
+        if request.core not in system.cores:  # e.g. a standalone emulator for it
+            cores.require(request.core)
     except (CoreCatalogError, SystemCatalogError) as exc:
         raise BuildError(str(exc)) from exc
     if not request.rom.is_file():

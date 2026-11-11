@@ -8,7 +8,12 @@ from pathlib import Path
 
 import pytest
 
-from forwarder3ds.builder.injector import make_request, request_from_project, write_romfs
+from forwarder3ds.builder.injector import (
+    make_request,
+    request_from_project,
+    validate_request,
+    write_romfs,
+)
 from forwarder3ds.builder.toolchain import Base
 from forwarder3ds.core.core_options import (
     CoreOptionsError,
@@ -22,6 +27,7 @@ from forwarder3ds.core.game_config import (
     parse_remap,
     remap_text,
 )
+from forwarder3ds.core.cores import DEFAULT_CORES_JSON, CoreRegistry
 from forwarder3ds.core.projects import Asset, BannerStyle, ProjectStore
 from forwarder3ds.core.systems import SystemCatalog
 
@@ -205,3 +211,15 @@ def test_standalone_base_romfs(tmp_path: Path) -> None:
 def test_snes_alternatives() -> None:
     snes = SystemCatalog.load().require("snes")
     assert snes.cores == ("snes9x2005", "snes9x_3ds")
+
+
+def test_standalone_core_validates() -> None:
+    validate_request(make_request(
+        rom=Path(__file__),
+        console="snes",
+        core="snes9x_3ds",
+        long_name="X",
+        output=Path("x.cia")),  # fmt: skip
+        CoreRegistry.load(DEFAULT_CORES_JSON),
+        SystemCatalog.load(),
+    )
