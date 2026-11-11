@@ -1,8 +1,9 @@
 """The default banner: the game's logo over a tag with the console and year.
 
-Layout of the 256x128 image::
+Layout of the 256x128 image, transparent except for the two of them (the
+HOME menu shows its theme through; the banner texture keeps 4-bit alpha)::
 
-    ┌──────────────────────────────┐   plain background colour
+    ┌──────────────────────────────┐
     │        GAME LOGO             │
     │   (or the title, as text)    │
     │   ╭──────────────────────╮   │   tag: checker pattern, outline and a
@@ -46,7 +47,11 @@ Font = ImageFont.FreeTypeFont | ImageFont.ImageFont
 
 @dataclass(frozen=True)
 class CardStyle:
-    """Colours (``#rrggbb``) and font (a TTF/OTF path; empty: built-in)."""
+    """Colours (``#rrggbb``) and font (a TTF/OTF path; empty: built-in).
+
+    ``background`` fills the tag; ``text`` is the caption, the tag's
+    outline and the title written when there is no logo.
+    """
 
     background: str = "#1e1e22"
     text: str = "#ffffff"
@@ -142,6 +147,14 @@ def _draw_logo(canvas: Image.Image, logo: bytes) -> bool:
     return True
 
 
+def _composite_shadow(canvas: Image.Image, shape: Image.Image, colour=(0, 0, 0)) -> None:
+    """A soft shadow of ``shape`` (an L mask), with no offset, under what comes next."""
+    alpha = shape.point(lambda value: value * _SHADOW_ALPHA // 255)
+    shadow = Image.new("RGBA", canvas.size, (*colour, 0))
+    shadow.putalpha(alpha.filter(ImageFilter.GaussianBlur(_SHADOW_RADIUS)))
+    canvas.alpha_composite(shadow)
+
+
 def _draw_title(canvas: Image.Image, title: str, style: CardStyle) -> None:
     """The title as text, in up to two lines, when there is no logo."""
     width = BANNER_WIDTH - 2 * _MARGIN
@@ -156,12 +169,17 @@ def _draw_title(canvas: Image.Image, title: str, style: CardStyle) -> None:
     line_height = font.size + 4 if isinstance(font, ImageFont.FreeTypeFont) else 14
     top = (_LOGO_HEIGHT - line_height * len(lines)) // 2 + 4
     colour = _rgb(style.text, (255, 255, 255))
-    shadow = (0, 0, 0, 160) if _is_light(colour) else (255, 255, 255, 140)
+    glow = (0, 0, 0) if _is_light(colour) else (255, 255, 255)
+    shape = Image.new("L", canvas.size, 0)
+    shape_draw = ImageDraw.Draw(shape)
+    places = []
     for index, line in enumerate(lines):
-        x = (BANNER_WIDTH - font.getlength(line)) / 2
-        y = top + index * line_height
-        draw.text((x + 2, y + 2), line, font=font, fill=shadow)
-        draw.text((x, y), line, font=font, fill=colour)
+        place = ((BANNER_WIDTH - font.getlength(line)) / 2, top + index * line_height)
+        places.append((place, line))
+        shape_draw.text(place, line, font=font, fill=255, stroke_width=2)
+    _composite_shadow(canvas, shape, glow)
+    for place, line in places:
+        draw.text(place, line, font=font, fill=colour)
 
 
 def _with_halo(icon: Image.Image, colour: tuple[int, int, int]) -> Image.Image:
@@ -184,12 +202,8 @@ def _draw_tag(  # pylint: disable=too-many-arguments,too-many-locals
     style: CardStyle,
     icon_path: Path | None,
 ) -> None:
-    background = _rgb(style.background, (30, 30, 34))
+    fill = _rgb(style.background, (30, 30, 34))
     text = _rgb(style.text, (255, 255, 255))
-    if _is_light(text):
-        fill = _mix(background, (0, 0, 0), 0.65)
-    else:
-        fill = _mix(background, (255, 255, 255), 0.7)
     icon = _with_halo(
         fit_icon(load_icon(console, icon_path), _TAG_HEIGHT - 6), _mix(fill, text, 0.45)
     )
@@ -204,10 +218,8 @@ def _draw_tag(  # pylint: disable=too-many-arguments,too-many-locals
     # Shadow straight under the tag (no offset): it separates the tag from
     # a background of a similar colour all the way round.
     shape = Image.new("L", canvas.size, 0)
-    ImageDraw.Draw(shape).rounded_rectangle(box, radius=radius, fill=_SHADOW_ALPHA)
-    shadow = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
-    shadow.putalpha(shape.filter(ImageFilter.GaussianBlur(_SHADOW_RADIUS)))
-    canvas.alpha_composite(shadow)
+    ImageDraw.Draw(shape).rounded_rectangle(box, radius=radius, fill=255)
+    _composite_shadow(canvas, shape)
 
     mask = Image.new("L", canvas.size, 0)
     ImageDraw.Draw(mask).rounded_rectangle(box, radius=radius, fill=255)
@@ -239,12 +251,11 @@ def render_card(
     ``icon`` replaces the console's default icon.
     """
     style = style or CardStyle()
-    background = _rgb(style.background, (30, 30, 34))
-    canvas = Image.new("RGBA", (BANNER_WIDTH, BANNER_HEIGHT), (*background, 255))
+    canvas = Image.new("RGBA", (BANNER_WIDTH, BANNER_HEIGHT), (0, 0, 0, 0))
     if not (logo and _draw_logo(canvas, logo)):
         _draw_title(canvas, title, style)
     _draw_tag(canvas, console, name, year, style, icon)
-    return canvas.convert("RGB")
+    return canvas
 
 
 def render_card_png(**kwargs: object) -> bytes:

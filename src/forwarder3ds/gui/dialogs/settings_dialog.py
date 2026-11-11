@@ -304,7 +304,7 @@ class BannerPage(_Page):
     def __init__(self) -> None:
         super().__init__()
         self.title = self.tr("Banner")
-        self._background = _ColourButton(self.tr("Banner background"))
+        self._background = _ColourButton(self.tr("Tag colour"))
         self._text = _ColourButton(self.tr("Banner text"))
         self._font = PathPicker(
             select_dir=False,
@@ -325,7 +325,7 @@ class BannerPage(_Page):
         icons_row.addWidget(icons_path, 1)
         icons_row.addWidget(icons)
         form = QFormLayout(self)
-        form.addRow(self.tr("Background:"), self._background)
+        form.addRow(self.tr("Tag colour:"), self._background)
         form.addRow(self.tr("Text:"), self._text)
         form.addRow(self.tr("Font:"), self._font)
         form.addRow(self.tr("Console icons:"), icons_row)

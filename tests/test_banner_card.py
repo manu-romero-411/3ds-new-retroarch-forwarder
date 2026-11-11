@@ -25,8 +25,9 @@ def _logo() -> bytes:
 def test_card_size_and_colours(console: str) -> None:
     style = CardStyle("#102030", "#ffffff")
     image = render_card(console=console, title="Some Game", year="1991", style=style)
-    assert image.size == (256, 128)
-    assert image.getpixel((0, 0)) == image.getpixel((8, 0)) == (16, 32, 48)  # plain
+    assert image.size == (256, 128) and image.mode == "RGBA"
+    assert image.getpixel((0, 0))[3] == 0  # no background: the HOME theme shows
+    assert image.getpixel((128, 105))[3] == 255  # the tag
 
 
 def test_card_logo_replaces_title() -> None:
