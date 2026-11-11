@@ -135,6 +135,11 @@ build_core() {
 
     log "[INFO]" "Building core ${CORE_NAME} (${CORE_REF})"
     checkout "${CORE_REPO}" "${CORE_REF}" "${core_dir}"
+    # Some cores (picodrive: Cyclone, libpicofe...) build from submodules.
+    if [[ -f "${core_dir}/.gitmodules" ]]; then
+        git -C "${core_dir}" submodule update -q --init --recursive --depth 1 \
+            || git -C "${core_dir}" submodule update -q --init --recursive
+    fi
     CFLAGS="${CORE_COMPAT_CFLAGS} ${CORE_CFLAGS}" \
         make -C "${core_dir}/${CORE_SUBDIR}" -f "${CORE_MAKEFILE}" platform=ctr \
         "${make_args[@]}" -j"${jobs}" > /dev/null
