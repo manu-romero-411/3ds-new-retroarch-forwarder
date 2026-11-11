@@ -1,0 +1,67 @@
+ctr: black touch screen in the menu without bottom_menu.png
+
+With bottom_menu.png the touch screen shows RetroArch's 3DS menu (resume,
+save and load state) while the menu is open. Without it, 0002 left the
+"Asset(s) not found" screen up for the whole session. Now the touch screen
+stays black (and ignores touches) while the menu is open, and in game it
+shows the idle picture (0004) or the usual "Tap the Touch Screen" text.
+
+An injected title ships no bottom_menu.png: its pause menu is the top
+screen only, like the Virtual Console's.
+
+Applies on top of 0004, to RetroArch v1.22.2 (RETROARCH_REF in versions.env).
+
+--- a/gfx/drivers/ctr_gfx.c
++++ b/gfx/drivers/ctr_gfx.c
+@@ -84,7 +84,9 @@
+ {
+    CTR_BOTTOM_MENU_NOT_AVAILABLE = 0,
+    CTR_BOTTOM_MENU_DEFAULT,
+-   CTR_BOTTOM_MENU_SELECT
++   CTR_BOTTOM_MENU_SELECT,
++   /* The menu is open but there is no bottom_menu.png: nothing drawn. */
++   CTR_BOTTOM_MENU_BLANK
+ } ctr_bottom_menu;
+ 
+ typedef struct
+@@ -1224,6 +1226,7 @@
+       switch (ctr->bottom_menu)
+       {
+          case CTR_BOTTOM_MENU_NOT_AVAILABLE:
++         case CTR_BOTTOM_MENU_BLANK:
+             return;
+          case CTR_BOTTOM_MENU_DEFAULT:
+             BIT64_SET(lifecycle_state, RARCH_MENU_TOGGLE);
+@@ -1355,15 +1358,16 @@
+       ctr->refresh_bottom_menu = true;
+    }
+ 
+-   /* Without bottom_menu.png the menu cannot be drawn: keep the
+-    * "asset not found" screen instead of rendering a NULL texture. */
+-   if (!ctr->bottom_textures[CTR_TEXTURE_BOTTOM_MENU].texture)
+-      ctr->bottom_menu = CTR_BOTTOM_MENU_NOT_AVAILABLE;
+ #ifdef HAVE_MENU
+-   else if (menu_state_get_ptr()->flags & MENU_ST_FLAG_ALIVE)
+-      ctr->bottom_menu = CTR_BOTTOM_MENU_SELECT;
+-#endif
++   /* Without bottom_menu.png the touch screen menu cannot be drawn (it
++    * would render a NULL texture): the touch screen stays black. */
++   if (menu_state_get_ptr()->flags & MENU_ST_FLAG_ALIVE)
++      ctr->bottom_menu = ctr->bottom_textures[CTR_TEXTURE_BOTTOM_MENU].texture
++            ? CTR_BOTTOM_MENU_SELECT
++            : CTR_BOTTOM_MENU_BLANK;
+    else
++#endif
++   /* In game: the idle picture, or RetroArch's "Tap the Touch Screen". */
+       ctr->bottom_menu = CTR_BOTTOM_MENU_DEFAULT;
+ 
+    if (ctr->prev_bottom_menu != ctr->bottom_menu)
+@@ -1479,6 +1483,8 @@
+                msg_hash_to_str(MSG_3DS_BOTTOM_MENU_DEFAULT),
+                &params);
+          break;
++      case CTR_BOTTOM_MENU_BLANK:
++         break;
+       case CTR_BOTTOM_MENU_SELECT:
+          {
+             struct ctr_bottom_texture_data *o = NULL;

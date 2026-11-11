@@ -45,9 +45,9 @@ RetroArch installed and never touches `sdmc:/retroarch`.
 - The injection options **preview both screens**: the game (libretro's
   screenshot, when the ROM is matched) scaled as the screen mode says, the
   bezel and the touch screen picture.
-- A trimmed pause menu (black theme, A confirms): the touch screen shows RetroArch's 3DS menu
-  (resume, save state, load state) and the Quick Menu keeps only what makes
-  sense for one game. CD games are single `.chd` files.
+- A trimmed pause menu (black theme, A confirms) on the top screen only:
+  the touch screen stays black while it is open, and the Quick Menu keeps
+  only what makes sense for one game. CD games are single `.chd` files.
 - ROMs are **identified against the libretro database** (No-Intro dats by
   CRC for cartridges, Redump names for discs): title, publisher and year
   fill the CIA's names, and libretro's title screen and snapshot can be

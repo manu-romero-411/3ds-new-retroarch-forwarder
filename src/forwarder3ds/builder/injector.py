@@ -86,7 +86,6 @@ MANIFEST_FILE = "manifest.cfg"
 SEED_CONFIG_FILE = "retroarch.cfg"
 #: The menu's colour theme, referenced by the seed config.
 MENU_THEME_FILE = "rgui_theme.cfg"
-BOTTOM_MENU_FILE = "bottom_menu.png"
 #: Drawn by RetroArch on the touch screen while the game runs (patch 0004).
 BOTTOM_IDLE_FILE = "bottom_idle.png"
 BEZEL_FILE = "bezel.png"
@@ -374,11 +373,11 @@ def _write_bottom_picture(target: Path, request: GameRequest, base: Base) -> Non
 
 
 def _write_retroarch_pictures(romfs: Path, request: GameRequest, base: Base) -> None:
-    """Touch screen pictures (menu and idle) and the bezel overlay, for RetroArch."""
-    if base.bottom_menu is not None:
-        shutil.copyfile(base.bottom_menu, romfs / BOTTOM_MENU_FILE)
-    else:
-        _log.warning("The %s base has no bottom_menu.png: no touch screen menu", base.core)
+    """The touch screen picture and the bezel overlay, for RetroArch.
+
+    No ``bottom_menu.png``: without it the touch screen stays black while the
+    menu is open (``retroarch/patches/0005``), as on the Virtual Console.
+    """
     _write_bottom_picture(romfs / BOTTOM_IDLE_FILE, request, base)
     if request.bezel is not None:
         prepare_bezel(request.bezel, romfs / BEZEL_FILE)

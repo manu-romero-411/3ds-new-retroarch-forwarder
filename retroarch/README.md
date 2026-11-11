@@ -45,6 +45,9 @@ Written against the RetroArch release in `RETROARCH_REF`; bump both together.
 - `0004-ctr-bottom-idle-picture.patch`: while the game runs, the touch
   screen shows `romfs:/bottom_idle.png` (the injector's Virtual Console style
   picture) instead of RetroArch's "Tap the Touch Screen…" text.
+- `0005-ctr-black-touch-screen-in-menu.patch`: without `bottom_menu.png`
+  (injected titles ship none), the touch screen stays black while the menu
+  is open, instead of RetroArch's touch screen menu (resume, save/load state).
 
 ## Core recipes
 
