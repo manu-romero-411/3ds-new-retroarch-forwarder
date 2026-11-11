@@ -54,6 +54,8 @@ where = ["src"]
     "*.rsf",
     "*.cfg",
     "*.png",
+    "bottom_screen/*",
+    "console_icons/*.png",
     "icons/*.svg",
     "jingles/*",
     "platform_logos/*",

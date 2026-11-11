@@ -23,6 +23,7 @@ from pathlib import Path
 
 from forwarder3ds import __version__
 from forwarder3ds.artwork.banner_card import CardStyle, render_card_to_file
+from forwarder3ds.artwork.bottom_screen import MESSAGES, BottomScreenStyle
 from forwarder3ds.artwork.compositor import compose_banner_to_file
 from forwarder3ds.artwork.steamgriddb import SGDBClient, SGDBError, fetch_best_artwork
 from forwarder3ds.builder.errors import BuildError
@@ -259,7 +260,15 @@ def _request_from_args(args: argparse.Namespace, settings: Settings, scratch: Pa
         remap=dict(loaded.remap) if loaded else {},
         manual_unique_id=unique_id,
         replace_existing_id=loaded is not None and unique_id == loaded.unique_id,
+        bottom_screen=_bottom_screen(args, settings),
     )
+
+
+def _bottom_screen(args: argparse.Namespace, settings: Settings) -> BottomScreenStyle | None:
+    touch = settings.bottom_screen
+    if args.no_touch_screen or not touch.enabled:
+        return None
+    return BottomScreenStyle(args.touch_language or touch.language, touch.font)
 
 
 def _describe_screen(screen: ScreenSettings | None) -> str:
@@ -561,6 +570,16 @@ def _add_build_parser(sub: argparse._SubParsersAction) -> None:
         help="top screen bezel, any size (stretched to 400x240; transparent where the game shows)",
     )
     bezel.add_argument("--no-bezel", action="store_true", help="drop the loaded CIA's bezel")
+
+    touch = build.add_argument_group("touch screen (Virtual Console style; font from the settings)")
+    touch.add_argument(
+        "--touch-language",
+        choices=sorted(MESSAGES),
+        help="language of the touch screen message (default: the settings')",
+    )
+    touch.add_argument(
+        "--no-touch-screen", action="store_true", help="keep the emulator's own touch screen"
+    )
 
     screen = build.add_argument_group("screen")
     screen.add_argument(

@@ -82,6 +82,24 @@ class Base:  # pylint: disable=too-many-instance-attributes
         """True for a standalone emulator (no RetroArch settings apply)."""
         return self.info.get("KIND") == "standalone"
 
+    @property
+    def menu_name(self) -> str:
+        """What the emulator's menu is called, for the touch screen's message."""
+        return self.info.get("MENU_NAME") or ("RetroArch" if not self.standalone else self.core)
+
+    def _romfs_files(self, key: str) -> list[str]:
+        return [item for item in self.info.get(key, "").split(",") if item.strip()]
+
+    @property
+    def bottom_screen_files(self) -> list[str]:
+        """RomFS paths a standalone emulator reads its touch screen picture from."""
+        return self._romfs_files("BOTTOM_SCREEN_FILES")
+
+    @property
+    def top_background_files(self) -> list[str]:
+        """RomFS paths a standalone emulator reads its picture behind the game from."""
+        return self._romfs_files("TOP_BACKGROUND_FILES")
+
     @classmethod
     def load(cls, directory: Path) -> "Base":
         """Read ``directory`` (``bases/<core>``); raise :class:`BuildError` if broken."""

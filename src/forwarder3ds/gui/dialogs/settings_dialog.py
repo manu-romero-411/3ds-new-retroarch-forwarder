@@ -14,6 +14,7 @@ from PySide6.QtGui import QColor, QDesktopServices, QPixmap
 from PySide6.QtWidgets import (
     QColorDialog,
     QCheckBox,
+    QComboBox,
     QDialog,
     QDialogButtonBox,
     QFormLayout,
@@ -28,6 +29,11 @@ from PySide6.QtWidgets import (
 )
 
 from forwarder3ds.artwork.banner_card import CardStyle, render_card_png
+from forwarder3ds.artwork.bottom_screen import (
+    LANGUAGE_NAMES,
+    BottomScreenStyle,
+    render_bottom_screen_png,
+)
 from forwarder3ds.artwork.console_icons import icons_dir
 from forwarder3ds.artwork.steamgriddb import API_KEY_HELP_URL, SGDBClient
 from forwarder3ds.builder.toolchain import find_toolchain
@@ -365,6 +371,69 @@ class BannerPage(_Page):
         settings.banner.font = style.font
 
 
+class BottomScreenPage(_Page):
+    """The Virtual Console style touch screen shown while a game runs."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.title = self.tr("Touch screen")
+        self._enabled = QCheckBox(self.tr("Virtual Console style touch screen"))
+        self._language = QComboBox()
+        for code, name in LANGUAGE_NAMES.items():
+            self._language.addItem(name, code)
+        self._font = PathPicker(
+            select_dir=False,
+            placeholder=self.tr("Built-in"),
+            file_filter=self.tr("Fonts (*.ttf *.otf)"),
+        )
+        self._preview = QLabel()
+        self._preview.setFixedSize(320, 240)
+        self._enabled.toggled.connect(self._refresh)
+        self._language.currentIndexChanged.connect(self._refresh)
+        self._font.edit.textChanged.connect(self._refresh)
+
+        form = QFormLayout(self)
+        form.addRow(self._enabled)
+        form.addRow(self.tr("Language:"), self._language)
+        form.addRow(self.tr("Font:"), self._font)
+        form.addRow(
+            "",
+            _hint(
+                self.tr(
+                    "Shown on the touch screen while the game runs, instead of the "
+                    "emulator's own. Nintendo's font is FOT-Rodin (not included)."
+                )
+            ),
+        )
+        form.addRow(self._preview)
+
+    def _style(self) -> BottomScreenStyle:
+        return BottomScreenStyle(self._language.currentData() or "en", self._font.text())
+
+    def _refresh(self) -> None:
+        enabled = self._enabled.isChecked()
+        self._language.setEnabled(enabled)
+        self._font.setEnabled(enabled)
+        pixmap = QPixmap()
+        if enabled:
+            pixmap.loadFromData(render_bottom_screen_png("RetroArch", self._style()))
+        self._preview.setPixmap(pixmap)
+
+    def load(self, settings: Settings) -> None:
+        touch = settings.bottom_screen
+        self._enabled.setChecked(touch.enabled)
+        index = self._language.findData(touch.language)
+        self._language.setCurrentIndex(max(index, 0))
+        self._font.set_text(touch.font)
+        self._refresh()
+
+    def store(self, settings: Settings) -> None:
+        style = self._style()
+        settings.bottom_screen.enabled = self._enabled.isChecked()
+        settings.bottom_screen.language = style.language
+        settings.bottom_screen.font = style.font
+
+
 class SettingsDialog(QDialog):
     """Side list of pages plus OK / Apply / Cancel."""
 
@@ -381,6 +450,7 @@ class SettingsDialog(QDialog):
             ToolchainPage(),
             MediaPage(),
             BannerPage(),
+            BottomScreenPage(),
         ]
 
         self._list = QListWidget()

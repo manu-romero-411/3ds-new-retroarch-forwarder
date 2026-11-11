@@ -42,6 +42,9 @@ Written against the RetroArch release in `RETROARCH_REF`; bump both together.
   touch screen menu when `bottom_menu.png` is missing (upstream bug).
 - `0003-ctr-bottom-screen-stays-lit.patch`: the touch screen no longer dims
   and switches off when idle (it left Rosalina's menu in the dark).
+- `0004-ctr-bottom-idle-picture.patch`: while the game runs, the touch
+  screen shows `romfs:/bottom_idle.png` (the injector's Virtual Console style
+  picture) instead of RetroArch's "Tap the Touch Screen…" text.
 
 ## Core recipes
 

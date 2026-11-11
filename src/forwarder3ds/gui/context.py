@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from forwarder3ds.artwork.banner_card import CardStyle, render_card_png
+from forwarder3ds.artwork.bottom_screen import BottomScreenStyle
 from forwarder3ds.builder.errors import BuildError
 from forwarder3ds.builder.injector import GameRequest, request_from_project
 from forwarder3ds.builder.toolchain import Toolchain, find_toolchain
@@ -155,9 +156,16 @@ class AppContext:  # pylint: disable=too-many-instance-attributes
         if not (project.rom and project.console and project.core):
             return None
         try:
-            return request_from_project(project, output or Path(), self.systems)
+            request = request_from_project(project, output or Path(), self.systems)
         except BuildError:
             return None
+        request.bottom_screen = self.bottom_screen_style()
+        return request
+
+    def bottom_screen_style(self) -> BottomScreenStyle | None:
+        """The touch screen picture's language and font (``None``: turned off)."""
+        touch = self.settings.bottom_screen
+        return BottomScreenStyle(touch.language, touch.font) if touch.enabled else None
 
     def preview_unique_id(self, project: Project) -> tuple[int | None, str | None]:
         """``(unique_id, None)``, ``(None, error)``, or ``(None, None)`` if incomplete."""

@@ -78,6 +78,18 @@ def prepare_bezel(src: Path, dst: Path) -> None:
     resize_image_stretch(src, dst, BEZEL_WIDTH, BEZEL_HEIGHT)
 
 
+def prepare_flat_bezel(src: Path | None, dst: Path) -> None:
+    """Like :func:`prepare_bezel`, but opaque: the bezel over black (black if ``src`` is None).
+
+    For emulators that draw a plain picture behind the game (snes9x_3ds keeps
+    it as RGB565, without transparency).
+    """
+    flat = Image.new("RGBA", (BEZEL_WIDTH, BEZEL_HEIGHT), (0, 0, 0, 255))
+    if src is not None:
+        flat.alpha_composite(_open_image(src).resize(flat.size, _RESAMPLE))
+    flat.convert("RGB").save(dst, format="PNG")
+
+
 # ── Audio ────────────────────────────────────────────────────────────────
 
 

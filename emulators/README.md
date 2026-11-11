@@ -18,7 +18,13 @@ the devkitARM container, installing the devkitPro packages its recipe lists
 | `app.rsf` | its own makerom settings (`APP_ROMFS`, `APP_SYSTEM_MODE`... are filled per game) |
 | `romfs/` | its own RomFS files, copied into every game's RomFS |
 | `icon.png`, `banner.png` | its default artwork |
-| `base.env` | `KIND=standalone`, revision, patch digest and memory modes |
+| `base.env` | `KIND=standalone`, revision, patch digest, memory modes and the pictures below |
+
+The recipe can also name RomFS pictures the injector replaces in each game
+(written to `base.env`): `EMU_BOTTOM_SCREEN` (the touch screen, replaced
+with the Virtual Console style one; `EMU_MENU_NAME` is the emulator's name
+in its message) and `EMU_TOP_BACKGROUND` (drawn behind the game: replaced
+with the bezel flattened on black, or plain black).
 
 A game's RomFS then holds the emulator's files plus `game.<ext>` and the
 same `manifest.cfg` RetroArch bases read (`content`, `data_dir`, ...). The
@@ -35,7 +41,9 @@ and SA-1 games). `0001-single-game-mode.patch`:
   and cheats go straight into it (`game.srm`, `game.auto.frz`, `game.cfg`,
   `game.chx`...), next to the global `settings.cfg`;
 - loads the ROM at boot and resumes its auto savestate;
-- leaves out the ROM browser ("Games" tab) and the online updater.
+- leaves out the ROM browser ("Games" tab) and the online updater;
+- draws its game and second screen backgrounds at full opacity (they are
+  the injector's pictures, not the stock half-transparent art).
 
 Building it on the host instead (`DEVKITARM` set) needs `3ds-curl`,
 `3ds-mbedtls`, `3ds-libpng` and `3ds-zlib` installed with `dkp-pacman`.

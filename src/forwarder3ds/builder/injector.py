@@ -34,11 +34,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from forwarder3ds.artwork.bottom_screen import BottomScreenStyle, render_bottom_screen_to_file
 from forwarder3ds.builder.errors import BuildError
 from forwarder3ds.builder.media import (
     prepare_banner_audio,
     prepare_banner_image,
     prepare_bezel,
+    prepare_flat_bezel,
     prepare_icon,
 )
 from forwarder3ds.builder.placeholders import ensure_placeholder_assets
@@ -82,6 +84,8 @@ SEED_CONFIG_FILE = "retroarch.cfg"
 #: The menu's colour theme, referenced by the seed config.
 MENU_THEME_FILE = "rgui_theme.cfg"
 BOTTOM_MENU_FILE = "bottom_menu.png"
+#: Drawn by RetroArch on the touch screen while the game runs (patch 0004).
+BOTTOM_IDLE_FILE = "bottom_idle.png"
 BEZEL_FILE = "bezel.png"
 BEZEL_OVERLAY_FILE = "bezel.cfg"
 #: RetroArch overlay showing ``bezel.png`` over the whole top screen (the same
@@ -127,6 +131,8 @@ class GameRequest:  # pylint: disable=too-many-instance-attributes
     #: Game controls: 3DS button -> RetroPad button (see :mod:`~forwarder3ds.core.game_config`).
     remap: dict[str, str] = field(default_factory=dict)
     manual_unique_id: int | None = None
+    #: The Virtual Console style touch screen (``None``: the emulator's own).
+    bottom_screen: BottomScreenStyle | None = None
     #: Keep the game out of the HOME menu's Activity Log.
     hide_from_activity_log: bool = False
     #: Set when rebuilding a CIA loaded from disk under its original Title
@@ -308,9 +314,9 @@ def seed_config_text(request: GameRequest) -> str:
 def write_romfs(directory: Path, request: GameRequest, base: Base) -> Path:
     """Lay out the CIA's RomFS in ``directory/romfs`` and return that folder.
 
-    A standalone emulator gets its own RomFS files, the ROM and the manifest
-    only: RetroArch's settings (screen, controls, core options, bezel) do
-    not apply to it.
+    A standalone emulator gets its own RomFS files, the ROM, the manifest and
+    the pictures it can take (touch screen; bezel, as its game background):
+    RetroArch's settings (screen, controls, core options) do not apply to it.
     """
     romfs = directory / "romfs"
     if base.standalone and base.romfs is not None:
@@ -326,20 +332,13 @@ def write_romfs(directory: Path, request: GameRequest, base: Base) -> Path:
         raise BuildError(f"Cannot read {request.rom}: {exc}") from exc
     (romfs / MANIFEST_FILE).write_text(manifest_text(request), encoding="utf-8")
     if base.standalone:
-        if request.bezel or request.core_options or request.remap:
-            _log.info(
-                "%s has its own settings: bezel, controls and core options skipped", base.core
-            )
+        _write_standalone_pictures(romfs, request, base)
+        if request.core_options or request.remap:
+            _log.info("%s has its own settings: controls and core options skipped", base.core)
         return romfs
     (romfs / SEED_CONFIG_FILE).write_text(seed_config_text(request), encoding="utf-8")
     shutil.copyfile(bundled(MENU_THEME_FILE), romfs / MENU_THEME_FILE)
-    if base.bottom_menu is not None:
-        shutil.copyfile(base.bottom_menu, romfs / BOTTOM_MENU_FILE)
-    else:
-        _log.warning("The %s base has no bottom_menu.png: no touch screen menu", base.core)
-    if request.bezel is not None:
-        prepare_bezel(request.bezel, romfs / BEZEL_FILE)
-        (romfs / BEZEL_OVERLAY_FILE).write_text(BEZEL_OVERLAY, encoding="utf-8")
+    _write_retroarch_pictures(romfs, request, base)
     if request.core_options:
         for value in request.core_options.values():
             _quote(value)
@@ -350,6 +349,41 @@ def write_romfs(directory: Path, request: GameRequest, base: Base) -> Path:
     if remap:
         (romfs / REMAP_FILE).write_text(remap, encoding="utf-8")
     return romfs
+
+
+def _write_retroarch_pictures(romfs: Path, request: GameRequest, base: Base) -> None:
+    """Touch screen pictures (menu and idle) and the bezel overlay, for RetroArch."""
+    if base.bottom_menu is not None:
+        shutil.copyfile(base.bottom_menu, romfs / BOTTOM_MENU_FILE)
+    else:
+        _log.warning("The %s base has no bottom_menu.png: no touch screen menu", base.core)
+    if request.bottom_screen is not None:
+        render_bottom_screen_to_file(
+            romfs / BOTTOM_IDLE_FILE, base.menu_name, request.bottom_screen
+        )
+    if request.bezel is not None:
+        prepare_bezel(request.bezel, romfs / BEZEL_FILE)
+        (romfs / BEZEL_OVERLAY_FILE).write_text(BEZEL_OVERLAY, encoding="utf-8")
+
+
+def _write_standalone_pictures(romfs: Path, request: GameRequest, base: Base) -> None:
+    """Replace a standalone emulator's own backgrounds with the project's.
+
+    The base lists which of its RomFS pictures are the touch screen and the
+    picture behind the game (``base.env``); the bezel is flattened on black,
+    as the emulator draws it under the game, without transparency.
+    """
+    if request.bottom_screen is not None:
+        for name in base.bottom_screen_files:
+            target = romfs / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            render_bottom_screen_to_file(target, base.menu_name, request.bottom_screen)
+    for name in base.top_background_files:
+        target = romfs / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        prepare_flat_bezel(request.bezel, target)
+    if request.bezel is not None and not base.top_background_files:
+        _log.info("%s has no background to replace: bezel skipped", base.core)
 
 
 def _make_smdh_and_banner(

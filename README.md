@@ -27,6 +27,11 @@ RetroArch installed and never touches `sdmc:/retroarch`.
 - An optional **bezel** over the top screen (`--bezel`, 400x240 with a
   transparent window: a 4:3 game is the middle 320x240), replaceable per
   game by dropping a `bezel.png` in its save folder.
+- A **Virtual Console style touch screen** while the game runs ("Tap the
+  Touch Screen to go to the RetroArch menu." and "⌂: Return to HOME Menu"),
+  in English, Japanese, French, German, Italian, Spanish, Dutch, Portuguese
+  or Russian (Settings › Touch screen, `--touch-language`). Nintendo's font
+  is FOT-Rodin: it is not included, point the setting to your copy.
 - A trimmed pause menu (black theme, A confirms): the touch screen shows RetroArch's 3DS menu
   (resume, save state, load state) and the Quick Menu keeps only what makes
   sense for one game. CD games are single `.chd` files.
@@ -41,7 +46,9 @@ RetroArch installed and never touches `sdmc:/retroarch`.
   (`emulators/snes9x_3ds/`) to boot straight into the game and keep its
   files flat in the same save folder (`game.srm`, `game.auto.frz`,
   `game.cfg`, `settings.cfg`); its own menu replaces RetroArch's, so the
-  injection options (screen, controls, core options, bezel) do not apply.
+  injection options (screen, controls, core options) do not apply. The
+  bezel becomes its picture behind the game (flattened on black) and the
+  touch screen picture its second screen background.
 - ROMs can stay zipped, as No-Intro sets come: the zip's ROM is identified
   by the CRC the zip stores and packed uncompressed into the CIA.
 - Artwork comes from **SteamGridDB** (icon, hero and logo; the banner is the

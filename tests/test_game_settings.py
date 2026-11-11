@@ -7,7 +7,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from PIL import Image
 
+from forwarder3ds.artwork.bottom_screen import BottomScreenStyle
 from forwarder3ds.builder.injector import (
     make_request,
     request_from_project,
@@ -206,6 +208,36 @@ def test_standalone_base_romfs(tmp_path: Path) -> None:
     manifest = (romfs / "manifest.cfg").read_text(encoding="utf-8")
     assert 'content = "game.sfc"' in manifest
     assert 'data_dir = "sdmc:/saves/snes/Super Mario World"' in manifest
+
+
+def test_standalone_base_pictures(tmp_path: Path) -> None:
+    base_dir = tmp_path / "bases" / "snes9x_3ds"
+    (base_dir / "romfs").mkdir(parents=True)
+    (base_dir / "app.elf").write_bytes(b"\x7fELF")
+    (base_dir / "app.rsf").write_text("RomFs:\n", encoding="utf-8")
+    (base_dir / "base.env").write_text(
+        "KIND=standalone\nCORE_NAME=snes9x_3ds\nMENU_NAME=snes9x\n"
+        "BOTTOM_SCREEN_FILES=gfx/second_us.png,gfx/second_pal.png\n"
+        "TOP_BACKGROUND_FILES=gfx/game.png\n",
+        encoding="utf-8",
+    )
+    base = Base.load(base_dir)
+    assert base.menu_name == "snes9x"
+    assert base.bottom_screen_files == ["gfx/second_us.png", "gfx/second_pal.png"]
+
+    bezel = tmp_path / "bezel.png"
+    Image.new("RGBA", (40, 24), (255, 0, 0, 0)).save(bezel)
+    rom = tmp_path / "Game.sfc"
+    rom.write_bytes(b"\0" * 16)
+    request = make_request(rom=rom, core="snes9x_3ds", long_name="Game", output=tmp_path / "o.cia",
+                           bezel=bezel, bottom_screen=BottomScreenStyle("es"))  # fmt: skip
+    romfs = write_romfs(tmp_path / "scratch", request, base)
+    for name in ("gfx/second_us.png", "gfx/second_pal.png"):
+        with Image.open(romfs / name) as picture:
+            assert picture.size == (320, 240)
+    with Image.open(romfs / "gfx/game.png") as game:
+        assert game.size == (400, 240) and game.mode == "RGB"
+        assert game.getpixel((200, 120)) == (0, 0, 0)  # transparent bezel: flattened on black
 
 
 def test_snes_alternatives() -> None:

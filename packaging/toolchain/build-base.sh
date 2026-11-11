@@ -180,6 +180,7 @@ build_emulator() {
     local work="$1" name="$2" out_dir="$3" patch jobs
     local EMU_NAME EMU_REPO EMU_REF EMU_MAKE_ARGS="" EMU_ELF EMU_RSF EMU_ROMFS
     local EMU_ICON EMU_BANNER APP_SYSTEM_MODE APP_SYSTEM_MODE_EXT EMU_PACKAGES=""
+    local EMU_MENU_NAME="" EMU_BOTTOM_SCREEN="" EMU_TOP_BACKGROUND=""
     # shellcheck source=emulators/snes9x_3ds/recipe.env
     source "${EMULATORS_DIR}/${name}/recipe.env"
     local src="${work}/emulators/${EMU_NAME}" dest="${out_dir}/bases/${EMU_NAME}"
@@ -211,6 +212,9 @@ build_emulator() {
         echo "PATCHES=$(emulator_patches_digest "${name}")"
         echo "APP_SYSTEM_MODE=${APP_SYSTEM_MODE}"
         echo "APP_SYSTEM_MODE_EXT=${APP_SYSTEM_MODE_EXT}"
+        echo "MENU_NAME=${EMU_MENU_NAME:-${EMU_NAME}}"
+        echo "BOTTOM_SCREEN_FILES=${EMU_BOTTOM_SCREEN}"
+        echo "TOP_BACKGROUND_FILES=${EMU_TOP_BACKGROUND}"
     } > "${dest}/base.env"
     log "[ OK ]" "Base ready: ${dest}/app.elf"
 }

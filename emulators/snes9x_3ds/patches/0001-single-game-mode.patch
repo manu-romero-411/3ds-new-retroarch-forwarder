@@ -9,6 +9,8 @@ romfs:/manifest.cfg (content = "game.sfc", data_dir =
   game.cfg, ...), next to the global settings.cfg;
 - loads the ROM and resumes the auto savestate at boot;
 - leaves out the "Games" tab (ROM browser) and the online updater.
+- draws the game and second screen backgrounds at full opacity: the
+  injector replaces romfs:/gfx/background_*.png with its own pictures.
 
 Without a manifest nothing changes. Applies to matbo87/snes9x_3ds v2.0.
 
@@ -162,7 +164,7 @@ index 59a42d9..84b9730 100644
      while (aptMainLoop() && session3DS.emulatorState != EMUSTATE_END) {
          switch (session3DS.emulatorState) {
 diff --git a/source/3dssettings.cpp b/source/3dssettings.cpp
-index b4ae407..aa1c784 100644
+index b4ae407..2472b2c 100644
 --- a/source/3dssettings.cpp
 +++ b/source/3dssettings.cpp
 @@ -8,11 +8,12 @@
@@ -179,6 +181,18 @@ index b4ae407..aa1c784 100644
      
      memset(settings3DS.defaultDir, 0, sizeof(settings3DS.defaultDir));
      memset(settings3DS.lastSelectedDir, 0, sizeof(settings3DS.lastSelectedDir));
+@@ -46,6 +47,11 @@ void settings3dsResetGlobalDefaults() {
+     settings3DS.GameScreenBgOpacity = OPACITY_STEPS / 2;
+     settings3DS.SecondScreenBg = Setting::AssetMode::Adaptive;
+     settings3DS.SecondScreenBgOpacity = OPACITY_STEPS / 2;
++    if (singleGameActive()) {
++        // An injected title ships its own backgrounds: show them as drawn.
++        settings3DS.GameScreenBgOpacity = OPACITY_STEPS;
++        settings3DS.SecondScreenBgOpacity = OPACITY_STEPS;
++    }
+ 
+     settings3DS.ShowFPS = false;
+ 
 diff --git a/source/3dssinglegame.cpp b/source/3dssinglegame.cpp
 new file mode 100644
 index 0000000..756aa90

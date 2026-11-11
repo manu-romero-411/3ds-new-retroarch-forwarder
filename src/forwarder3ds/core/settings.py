@@ -80,6 +80,18 @@ class BannerSettings:
 
 
 @dataclass
+class BottomScreenSettings:
+    """The touch screen shown while a game runs (Virtual Console style)."""
+
+    #: Draw it; off leaves the emulator's own idle screen.
+    enabled: bool = True
+    #: Language of the message (a code of ``artwork.bottom_screen.MESSAGES``).
+    language: str = "en"
+    #: A TTF/OTF file (Nintendo's is FOT-Rodin); empty for the built-in font.
+    font: str = ""
+
+
+@dataclass
 class Settings:
     """Everything the user can configure."""
 
@@ -87,9 +99,10 @@ class Settings:
     steamgriddb: SteamGridDBSettings = field(default_factory=SteamGridDBSettings)
     toolchain: ToolchainSettings = field(default_factory=ToolchainSettings)
     banner: BannerSettings = field(default_factory=BannerSettings)
+    bottom_screen: BottomScreenSettings = field(default_factory=BottomScreenSettings)
 
 
-_SECTIONS = ("general", "steamgriddb", "toolchain", "banner")
+_SECTIONS = ("general", "steamgriddb", "toolchain", "banner", "bottom_screen")
 
 
 def _read_ini(parser: configparser.ConfigParser) -> Settings:

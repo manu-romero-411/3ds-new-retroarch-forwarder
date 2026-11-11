@@ -1,0 +1,78 @@
+ctr: optional picture for the idle touch screen
+
+While a game runs the touch screen only shows "Tap the Touch Screen to go
+to the Retroarch menu" as plain text. When bottom_idle.png is found next
+to bottom_menu.png (directory_bottom_assets), draw that picture instead,
+so an injected title can show a Virtual Console style screen. Without the
+file nothing changes.
+
+Applies on top of 0003, to RetroArch v1.22.2 (RETROARCH_REF in versions.env).
+
+--- a/gfx/drivers/ctr_gfx.c
++++ b/gfx/drivers/ctr_gfx.c
+@@ -76,6 +76,7 @@
+ {
+    CTR_TEXTURE_BOTTOM_MENU = 0,
+    CTR_TEXTURE_STATE_THUMBNAIL,
++   CTR_TEXTURE_BOTTOM_IDLE,
+    CTR_TEXTURE_LAST
+ };
+ 
+@@ -950,6 +951,8 @@
+    {
+       case CTR_TEXTURE_BOTTOM_MENU:
+          return "bottom_menu.png";
++      case CTR_TEXTURE_BOTTOM_IDLE:
++         return "bottom_idle.png";
+       case CTR_TEXTURE_STATE_THUMBNAIL:
+          {
+             size_t _len;
+@@ -1375,6 +1378,37 @@
+    ctr->render_font_bottom = false;
+ }
+ 
++static bool ctr_draw_bottom_texture(ctr_video_t *ctr,
++      struct ctr_bottom_texture_data *o)
++{
++   ctr_texture_t *texture = (ctr_texture_t *)o->texture;
++   if (!texture)
++      return false;
++
++   ctrGuSetTexture(GPU_TEXUNIT0,
++         VIRT_TO_PHYS(texture->data),
++         texture->width,
++         texture->height,
++           GPU_TEXTURE_MAG_FILTER(GPU_LINEAR)
++         | GPU_TEXTURE_MIN_FILTER(GPU_LINEAR)
++         | GPU_TEXTURE_WRAP_S(GPU_CLAMP_TO_EDGE)
++         | GPU_TEXTURE_WRAP_T(GPU_CLAMP_TO_EDGE),
++         GPU_RGBA8);
++
++   GPUCMD_AddWrite(GPUREG_GSH_BOOLUNIFORM, 0);
++   ctrGuSetVertexShaderFloatUniform(0, (float*)&o->scale_vector, 1);
++   ctrGuSetAttributeBuffersAddress(VIRT_TO_PHYS(o->frame_coords));
++
++   GPU_SetViewport(NULL,
++         VIRT_TO_PHYS(ctr->drawbuffers.bottom),
++         0,
++         0,
++         CTR_BOTTOM_FRAMEBUFFER_HEIGHT,
++         CTR_BOTTOM_FRAMEBUFFER_WIDTH);
++   GPU_DrawArray(GPU_GEOMETRY_PRIM, 0, 1);
++   return true;
++}
++
+ static void ctr_render_bottom_screen(void *data)
+ {
+    struct font_params params  = { 0, };
+@@ -1426,6 +1460,10 @@
+             }
+          break;
+       case CTR_BOTTOM_MENU_DEFAULT:
++         /* An optional full-screen picture replaces the hint text. */
++         if (ctr_draw_bottom_texture(ctr,
++                  &ctr->bottom_textures[CTR_TEXTURE_BOTTOM_IDLE]))
++            break;
+          params.color = COLOR_ABGR(255, 255, 255, 255);
+          params.scale = 1.6f;
+          params.x     = 0.0f;
