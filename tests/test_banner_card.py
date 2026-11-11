@@ -26,8 +26,7 @@ def test_card_size_and_colours(console: str) -> None:
     style = CardStyle("#102030", "#ffffff")
     image = render_card(console=console, title="Some Game", year="1991", style=style)
     assert image.size == (256, 128)
-    assert image.getpixel((0, 0)) == (16, 32, 48)
-    assert image.getpixel((8, 0)) != (16, 32, 48)  # the checker pattern
+    assert image.getpixel((0, 0)) == image.getpixel((8, 0)) == (16, 32, 48)  # plain
 
 
 def test_card_logo_replaces_title() -> None:
@@ -44,11 +43,18 @@ def test_caption_keeps_the_year() -> None:
     assert banner_card._caption("", "", "", 120) == ("", None)  # pylint: disable=protected-access
 
 
-def test_custom_icon(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(console_icons, "custom_icons_dir", lambda: tmp_path)
-    Image.new("RGBA", (5, 5), (1, 2, 3, 255)).save(tmp_path / "snes.png")
-    assert console_icons.console_icon("snes").size == (5, 5)
-    assert console_icons.console_icon("gb").size == (22, 26)
+def test_icons(tmp_path: Path) -> None:
+    for console in ("gb", "snes", "psx", "megadrive", "nes", "gba"):
+        assert console_icons.default_icon_path(console).name == f"{console}.png"
+    assert console_icons.default_icon_path("unknown").name == "generic.png"
+    custom = tmp_path / "pad.png"
+    Image.new("RGBA", (5, 5), (1, 2, 3, 255)).save(custom)
+    assert console_icons.load_icon("snes", custom).size == (5, 5)
+    assert console_icons.load_icon("snes", tmp_path / "missing.png").size == (18, 8)
+    assert console_icons.fit_icon(Image.new("RGBA", (11, 13)), 26).size == (22, 26)
+    assert console_icons.fit_icon(Image.new("RGBA", (200, 100)), 26).size == (52, 26)
+    card = render_card(console="snes", title="X", year="1990", icon=custom)
+    assert card.size == (256, 128)
 
 
 def test_project_tag_fields(tmp_path: Path) -> None:

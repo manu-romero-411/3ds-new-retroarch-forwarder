@@ -2,12 +2,12 @@
 
 Layout of the 256x128 image::
 
-    ┌──────────────────────────────┐   background colour with a checker
-    │        GAME LOGO             │   pattern a shade lighter (or darker)
+    ┌──────────────────────────────┐   plain background colour
+    │        GAME LOGO             │
     │   (or the title, as text)    │
-    │   ╭──────────────────────╮   │   tag: console icon, then the
-    │   │ [icon]  Name · 1990  │   │   caption (name and/or year)
-    │   ╰──────────────────────╯   │
+    │   ╭──────────────────────╮   │   tag: checker pattern, outline and a
+    │   │ [icon]  Name · 1990  │   │   soft shadow all round; console icon,
+    │   ╰──────────────────────╯   │   then the caption (name and/or year)
     └──────────────────────────────┘
 
 The logo is the SteamGridDB one (or any image the user picks); without it
@@ -22,17 +22,19 @@ from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
-from forwarder3ds.artwork.console_icons import console_icon
+from forwarder3ds.artwork.console_icons import fit_icon, load_icon
 from forwarder3ds.ctr.formats import BANNER_HEIGHT, BANNER_WIDTH
 
-_CELL = 8
-_SHADE = 14
+_CELL = 4
+_SHADE = 12
+_SHADOW_RADIUS = 3
+_SHADOW_ALPHA = 200
 _MARGIN = 10
 _LOGO_HEIGHT = 80
-_TAG_TOP = 92
-_TAG_HEIGHT = 28
+_TAG_TOP = 90
+_TAG_HEIGHT = 32
 _TAG_PADDING = 9
 _TAG_GAP = 7
 _CAPTION_SIZE = 14
@@ -115,6 +117,7 @@ def _caption(name: str, year: str, font_path: str, room: int) -> tuple[str, Font
 
 
 def _checker(size: tuple[int, int], background: tuple[int, int, int]) -> Image.Image:
+    """``background`` with squares a shade lighter (or darker)."""
     image = Image.new("RGB", size, background)
     draw = ImageDraw.Draw(image)
     other = _shade(background, _SHADE)
@@ -173,31 +176,45 @@ def _with_halo(icon: Image.Image, colour: tuple[int, int, int]) -> Image.Image:
     return halo
 
 
-def _draw_tag(  # pylint: disable=too-many-locals
-    canvas: Image.Image, console: str, name: str, year: str, style: CardStyle
+def _draw_tag(  # pylint: disable=too-many-arguments,too-many-locals
+    canvas: Image.Image,
+    console: str,
+    name: str,
+    year: str,
+    style: CardStyle,
+    icon_path: Path | None,
 ) -> None:
     background = _rgb(style.background, (30, 30, 34))
     text = _rgb(style.text, (255, 255, 255))
-    fill = (
-        _mix(background, (0, 0, 0), 0.65)
-        if _is_light(text)
-        else _mix(background, (255, 255, 255), 0.7)
+    if _is_light(text):
+        fill = _mix(background, (0, 0, 0), 0.65)
+    else:
+        fill = _mix(background, (255, 255, 255), 0.7)
+    icon = _with_halo(
+        fit_icon(load_icon(console, icon_path), _TAG_HEIGHT - 6), _mix(fill, text, 0.45)
     )
-    icon = console_icon(console)
-    if icon.height > _TAG_HEIGHT - 6:
-        ratio = (_TAG_HEIGHT - 6) / icon.height
-        icon = icon.resize(
-            (max(1, round(icon.width * ratio)), _TAG_HEIGHT - 6), Image.Resampling.NEAREST
-        )
     room = BANNER_WIDTH - 2 * _MARGIN - 2 * _TAG_PADDING - icon.width - _TAG_GAP
     caption, font = _caption(name, year, style.font, room)
-    icon = _with_halo(icon, _mix(fill, text, 0.45))
     text_width = round(font.getlength(caption)) if font is not None else 0
     width = 2 * _TAG_PADDING + icon.width + (_TAG_GAP + text_width if caption else 0)
     left = (BANNER_WIDTH - width) // 2
     box = (left, _TAG_TOP, left + width - 1, _TAG_TOP + _TAG_HEIGHT - 1)
+    radius = _TAG_HEIGHT // 2
+
+    # Shadow straight under the tag (no offset): it separates the tag from
+    # a background of a similar colour all the way round.
+    shape = Image.new("L", canvas.size, 0)
+    ImageDraw.Draw(shape).rounded_rectangle(box, radius=radius, fill=_SHADOW_ALPHA)
+    shadow = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+    shadow.putalpha(shape.filter(ImageFilter.GaussianBlur(_SHADOW_RADIUS)))
+    canvas.alpha_composite(shadow)
+
+    mask = Image.new("L", canvas.size, 0)
+    ImageDraw.Draw(mask).rounded_rectangle(box, radius=radius, fill=255)
+    canvas.paste(_checker(canvas.size, fill), (0, 0), mask)
     draw = ImageDraw.Draw(canvas)
-    draw.rounded_rectangle(box, radius=_TAG_HEIGHT // 2, fill=fill, outline=text, width=2)
+    draw.rounded_rectangle(box, radius=radius, outline=text, width=2)
+
     icon_top = _TAG_TOP + (_TAG_HEIGHT - icon.height) // 2
     canvas.alpha_composite(icon, dest=(left + _TAG_PADDING, icon_top))
     if font is not None:
@@ -215,14 +232,18 @@ def render_card(
     year: str = "",
     logo: bytes | None = None,
     style: CardStyle | None = None,
+    icon: Path | None = None,
 ) -> Image.Image:
-    """The 256x128 banner for one game; the tag shows ``name`` and ``year`` if given."""
+    """The 256x128 banner for one game; the tag shows ``name`` and ``year`` if given.
+
+    ``icon`` replaces the console's default icon.
+    """
     style = style or CardStyle()
     background = _rgb(style.background, (30, 30, 34))
-    canvas = _checker((BANNER_WIDTH, BANNER_HEIGHT), background).convert("RGBA")
+    canvas = Image.new("RGBA", (BANNER_WIDTH, BANNER_HEIGHT), (*background, 255))
     if not (logo and _draw_logo(canvas, logo)):
         _draw_title(canvas, title, style)
-    _draw_tag(canvas, console, name, year, style)
+    _draw_tag(canvas, console, name, year, style, icon)
     return canvas.convert("RGB")
 
 

@@ -28,7 +28,7 @@ from PySide6.QtWidgets import (
 )
 
 from forwarder3ds.artwork.banner_card import CardStyle, render_card_png
-from forwarder3ds.artwork.console_icons import custom_icons_dir
+from forwarder3ds.artwork.console_icons import icons_dir
 from forwarder3ds.artwork.steamgriddb import API_KEY_HELP_URL, SGDBClient
 from forwarder3ds.builder.toolchain import find_toolchain
 from forwarder3ds.core import catalog, paths
@@ -318,18 +318,24 @@ class BannerPage(_Page):
         self._font.edit.textChanged.connect(self._refresh)
 
         icons = QPushButton(self.tr("Open"))
-        icons.clicked.connect(lambda: MediaPage.open_folder(custom_icons_dir()))
+        icons.clicked.connect(lambda: MediaPage.open_folder(icons_dir()))
+        icons_path = QLabel(str(icons_dir()))
+        icons_path.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        icons_row = QHBoxLayout()
+        icons_row.addWidget(icons_path, 1)
+        icons_row.addWidget(icons)
         form = QFormLayout(self)
         form.addRow(self.tr("Background:"), self._background)
         form.addRow(self.tr("Text:"), self._text)
         form.addRow(self.tr("Font:"), self._font)
-        form.addRow(self.tr("Console icons:"), icons)
+        form.addRow(self.tr("Console icons:"), icons_row)
         form.addRow(
             "",
             _hint(
                 self.tr(
-                    "A PNG named after the console (gb.png, snes.png…) in that folder "
-                    "replaces its built-in icon."
+                    "The default icon of each console: a PNG named after it (gb.png, "
+                    "snes.png…; generic.png for the rest). Each project can pick another "
+                    "image."
                 )
             ),
         )

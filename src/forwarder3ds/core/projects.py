@@ -46,6 +46,8 @@ class Asset(str, Enum):
     BEZEL = "bezel"
     #: The game's logo, for the default banner.
     LOGO = "logo"
+    #: The console icon on the default banner's tag (instead of the default one).
+    TAG_ICON = "tag_icon"
 
 
 class BannerStyle(str, Enum):

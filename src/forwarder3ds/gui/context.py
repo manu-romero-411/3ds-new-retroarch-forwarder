@@ -129,6 +129,7 @@ class AppContext:  # pylint: disable=too-many-instance-attributes
             year=project.tag_year,
             logo=logo,
             style=self.card_style(),
+            icon=project.asset(Asset.TAG_ICON),
         )
 
     def refresh_card(self, project: Project) -> None:

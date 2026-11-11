@@ -22,6 +22,7 @@ database entry, the save folder follows the long name.
 from __future__ import annotations
 
 from collections.abc import Callable
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 
@@ -45,6 +46,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from forwarder3ds.artwork.console_icons import fit_icon, icons_dir, load_icon
 from forwarder3ds.artwork.compositor import compose_banner_png_bytes
 from forwarder3ds.artwork.libretro import ThumbnailKind, fetch_thumbnail
 from forwarder3ds.artwork.steamgriddb import AssetKind
@@ -148,6 +150,9 @@ class ProjectEditor(QScrollArea):  # pylint: disable=too-many-instance-attribute
         self._card_name = QLineEdit()
         self._card_show_name = QCheckBox(self.tr("Show"))
         self._card_year = QLineEdit()
+        self._tag_icon = QLabel()
+        self._tag_icon.setFixedSize(56, 28)
+        self._tag_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._card_year.setMaximumWidth(80)
         self._card_timer = QTimer(self)
         self._card_timer.setSingleShot(True)
@@ -272,10 +277,18 @@ class ProjectEditor(QScrollArea):  # pylint: disable=too-many-instance-attribute
         logo_file = QPushButton(self.tr("From file…"))
         logo_file.clicked.connect(self._logo_from_file)
         logo_clear = QPushButton(self.tr("Clear"))
-        logo_clear.clicked.connect(lambda: self._set_logo(None))
+        logo_clear.clicked.connect(lambda: self._set_card_asset(Asset.LOGO, None))
         form = QFormLayout(self._card_box)
         form.setContentsMargins(0, 0, 0, 0)
         form.addRow(self.tr("Logo:"), _row(logo_sgdb, logo_file, logo_clear, stretch_first=False))
+        icon_change = QPushButton(self.tr("Change…"))
+        icon_change.clicked.connect(self._tag_icon_from_file)
+        icon_default = QPushButton(self.tr("Default"))
+        icon_default.clicked.connect(lambda: self._set_card_asset(Asset.TAG_ICON, None))
+        form.addRow(
+            self.tr("Console icon:"),
+            _row(self._tag_icon, icon_change, icon_default, stretch_first=False),
+        )
         form.addRow(self.tr("Name:"), _row(self._card_name, self._card_show_name))
         form.addRow(self.tr("Year:"), self._card_year)
         form.addRow(
@@ -593,26 +606,42 @@ class ProjectEditor(QScrollArea):  # pylint: disable=too-many-instance-attribute
             _log.error("Cannot draw the banner: %s", exc)
             return
         self._banner_source.setText("")
+        self._show_tag_icon()
         self._show_banner()
 
-    def _set_logo(self, source: Path | bytes | None) -> None:
+    def _set_card_asset(self, kind: Asset, source: Path | bytes | None) -> None:
         try:
-            self._context.store.set_asset(self._project, Asset.LOGO, source)
+            self._context.store.set_asset(self._project, kind, source)
         except OSError as exc:
-            _log.error("Cannot store the logo: %s", exc)
+            _log.error("Cannot store the %s: %s", kind.value, exc)
             return
         self._render_card()
 
     def _logo_from_file(self) -> None:
         path = self._pick_file(self.tr("Choose the logo"))
         if path is not None:
-            self._set_logo(path)
+            self._set_card_asset(Asset.LOGO, path)
+
+    def _tag_icon_from_file(self) -> None:
+        path, _filter = QFileDialog.getOpenFileName(
+            self, self.tr("Choose the console icon"), str(icons_dir()), IMAGE_FILE_FILTER
+        )
+        if path:
+            self._set_card_asset(Asset.TAG_ICON, Path(path))
+
+    def _show_tag_icon(self) -> None:
+        icon = load_icon(self._project.console, self._project.asset(Asset.TAG_ICON))
+        buffer = BytesIO()
+        fit_icon(icon, 26).save(buffer, format="PNG")
+        pixmap = QPixmap()
+        pixmap.loadFromData(buffer.getvalue())
+        self._tag_icon.setPixmap(pixmap)
 
     def _logo_from_sgdb(self) -> None:
         self._sgdb.pick(
             AssetKind.LOGO,
             self._project.long_name,
-            lambda data, _source: data and self._set_logo(data),
+            lambda data, _source: data and self._set_card_asset(Asset.LOGO, data),
         )
 
     def _banner_from_file(self) -> None:

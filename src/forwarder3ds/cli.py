@@ -146,6 +146,7 @@ def _images(  # pylint: disable=too-many-arguments,too-many-positional-arguments
             year=card.year,
             logo=logo,
             style=CardStyle(banner.background, banner.text, banner.font),
+            icon=args.tag_icon,
         )
     images.banner = images.banner or loaded_assets.banner
     return images
@@ -545,6 +546,9 @@ def _add_build_parser(sub: argparse._SubParsersAction) -> None:
     )
     art.add_argument("--year", help="year on the default banner (default: from --identify)")
     art.add_argument("--banner-name", help="name on the default banner's tag (default: none)")
+    art.add_argument(
+        "--tag-icon", type=Path, help="image for the console icon on the default banner's tag"
+    )
     art.add_argument("--banner", type=Path, help="ready-made banner (replaces hero + logo)")
     art.add_argument("--platform-logo", help="frame drawn over the banner: catalog name or PNG")
     bezel = art.add_mutually_exclusive_group()
