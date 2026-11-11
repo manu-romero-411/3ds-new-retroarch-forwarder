@@ -85,10 +85,19 @@ class Base:  # pylint: disable=too-many-instance-attributes
     @property
     def menu_name(self) -> str:
         """What the emulator's menu is called, for the touch screen's message."""
-        return self.info.get("MENU_NAME") or ("RetroArch" if not self.standalone else self.core)
+        if not self.standalone:
+            return self.info.get("MENU_NAME") or "RetroArch"
+        return self._standalone_info("MENU_NAME") or self.core
+
+    def _standalone_info(self, key: str) -> str:
+        """``key`` from ``base.env``; for a base built before it had it, the known value."""
+        value = self.info.get(key, "").strip()
+        if not value and self.standalone:
+            value = _STANDALONE_DEFAULTS.get(self.core, {}).get(key, "")
+        return value
 
     def _romfs_files(self, key: str) -> list[str]:
-        return [item for item in self.info.get(key, "").split(",") if item.strip()]
+        return [item.strip() for item in self._standalone_info(key).split(",") if item.strip()]
 
     @property
     def bottom_screen_files(self) -> list[str]:
@@ -122,6 +131,18 @@ class Base:  # pylint: disable=too-many-instance-attributes
             rsf=rsf if rsf.is_file() else None,
             romfs=romfs if romfs.is_dir() else None,
         )
+
+
+#: What ``emulators/<name>/recipe.env`` puts in ``base.env``, for bases built
+#: before those keys existed.
+_STANDALONE_DEFAULTS: dict[str, dict[str, str]] = {
+    "snes9x_3ds": {
+        "MENU_NAME": "snes9x",
+        "BOTTOM_SCREEN_FILES": "gfx/background_second_screen_us.png,"
+        "gfx/background_second_screen_pal.png",
+        "TOP_BACKGROUND_FILES": "gfx/background_game_screen.png",
+    },
+}
 
 
 @dataclass(frozen=True)

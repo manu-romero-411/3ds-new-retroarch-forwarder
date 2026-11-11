@@ -206,7 +206,8 @@ def test_standalone_base_romfs(tmp_path: Path) -> None:
                            output=tmp_path / "o.cia", remap={"a": "b"})  # fmt: skip
     romfs = write_romfs(tmp_path / "scratch", request, base)
     names = sorted(str(path.relative_to(romfs)) for path in romfs.rglob("*") if path.is_file())
-    assert names == ["game.sfc", "gfx/splash.t3x", "manifest.cfg"]
+    # no bezel: the stock game background becomes plain black
+    assert names == ["game.sfc", "gfx/background_game_screen.png", "gfx/splash.t3x", "manifest.cfg"]
     manifest = (romfs / "manifest.cfg").read_text(encoding="utf-8")
     assert 'content = "game.sfc"' in manifest
     assert 'data_dir = "sdmc:/saves/snes/Super Mario World"' in manifest
@@ -260,6 +261,18 @@ def test_own_touch_screen_image(tmp_path: Path) -> None:
     romfs = write_romfs(tmp_path / "scratch", request, Base.load(base_dir))
     with Image.open(romfs / "gfx/second.png") as second:
         assert second.size == (320, 240) and second.getpixel((160, 120)) == (10, 200, 30)
+
+
+def test_old_snes9x_base_still_gets_pictures(tmp_path: Path) -> None:
+    base_dir = tmp_path / "bases" / "snes9x_3ds"
+    (base_dir / "romfs").mkdir(parents=True)
+    (base_dir / "app.elf").write_bytes(b"\x7fELF")
+    (base_dir / "app.rsf").write_text("RomFs:\n", encoding="utf-8")
+    (base_dir / "base.env").write_text("KIND=standalone\nCORE_NAME=snes9x_3ds\n", "utf-8")
+    base = Base.load(base_dir)
+    assert base.menu_name == "snes9x"
+    assert "gfx/background_second_screen_us.png" in base.bottom_screen_files
+    assert base.top_background_files == ["gfx/background_game_screen.png"]
 
 
 def test_snes_alternatives() -> None:

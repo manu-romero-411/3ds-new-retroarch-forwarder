@@ -392,16 +392,21 @@ def _write_standalone_pictures(romfs: Path, request: GameRequest, base: Base) ->
     picture behind the game (``base.env``); the bezel is flattened on black,
     as the emulator draws it under the game, without transparency.
     """
-    for name in base.bottom_screen_files:
+    touch = request.bottom_image is not None or request.bottom_screen is not None
+    if touch and not base.bottom_screen_files:
+        _log.warning("The %s base names no touch screen picture: kept its own", base.core)
+    for name in base.bottom_screen_files if touch else ():
         target = romfs / name
         target.parent.mkdir(parents=True, exist_ok=True)
         _write_bottom_picture(target, request, base)
+        _log.info("Touch screen picture: romfs:/%s", name)
+    if request.bezel is not None and not base.top_background_files:
+        _log.warning("The %s base names no game background: bezel skipped", base.core)
     for name in base.top_background_files:
         target = romfs / name
         target.parent.mkdir(parents=True, exist_ok=True)
         prepare_flat_bezel(request.bezel, target)
-    if request.bezel is not None and not base.top_background_files:
-        _log.info("%s has no background to replace: bezel skipped", base.core)
+        _log.info("Game background (%s): romfs:/%s", "bezel" if request.bezel else "black", name)
 
 
 def _make_smdh_and_banner(
