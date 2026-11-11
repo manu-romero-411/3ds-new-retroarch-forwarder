@@ -18,6 +18,7 @@ RetroArch installed and never touches `sdmc:/retroarch`.
   ├── game.srm            in-game save
   ├── game.state*         save states (+ thumbnails)
   ├── game.opt            core options
+  ├── <core name>/game.rmp  button mapping (RetroArch remap)
   └── bezel.png           optional: replaces the CIA's bezel (bezel.cfg appears next to it)
   sdmc:/saves/bios/       BIOS files shared by every game
   ```
@@ -40,7 +41,12 @@ RetroArch installed and never touches `sdmc:/retroarch`.
   hero with the logo on top), or from your own image files.
 - Existing CIAs can be opened, edited and rebuilt under the same Title ID,
   so the new CIA installs over the old one (the ROM is read back from it).
-- Graphical interface (PySide6) and a command line with the same features.
+- Per-game **injection options**: screen scaling and filter, button
+  mapping and initial core options, all seeded into the save folder on
+  first boot, where they can still be edited by hand (or from RetroArch's
+  menu). RetroArch's menu confirms with A, as on the 3DS.
+- Graphical interface (PySide6), organised as a project library like
+  NSUI's, and a command line.
 
 ## Install
 
@@ -77,27 +83,30 @@ See [packaging/README.md](packaging/README.md) for how packages are built.
 3ds-forwarder-gui
 ```
 
-The window goes from general to specific:
+It is organised like New Super Ultimate Injector: a **library** of
+projects and one **tab** per project being edited.
 
-1. **Game** (left), laid out like New Super Ultimate Injector: *Game
-   information* (the ROM, picked with *Open ROM…*, its console and its
-   libretro database match, with title screen and snapshot), *CIA metadata*
-   (names and publisher) and *Content options* (core, save folder, bezel).
-   The console follows the ROM's extension, the core follows the console,
-   the names and publisher follow the database (or the file name) and the
-   save folder follows the long name, until you edit them.
-2. **Presentation** (middle): the **icon**, the **banner** (SteamGridDB hero
-   + logo, or a ready-made image, plus an optional platform frame) and the
-   **jingle**, with a play button. *SteamGridDB…* searches by the long name;
-   when several games match you pick one, then a gallery of thumbnails.
-3. **Preview** (right): a 3DS showing the banner on the top screen and the
-   icon on the HOME menu grid, exactly as they will be built.
+- **Library**: every project grouped by console (with counts), a search
+  box, *Select all*, and *Open*, *Delete*, *Export…* (settings and artwork,
+  not ROMs) and *Generate CIA* for the ticked projects (built one after the
+  other into the output folder). *New project from ROM…* starts one;
+  *Import…* takes an export file or a game CIA built by this tool (its ROM
+  is copied out, it keeps its Title ID).
+- **Project tab**, left: *Game information* (the ROM, its console and its
+  libretro database match, which can be changed by hand), *CIA metadata*
+  (long and short names, publisher, icon from a file or SteamGridDB) and
+  *Content options* (core, save folder, **Injection options…**). Right:
+  *CIA header* (Title ID, *Auto* or typed, *Random*; hide from the
+  Activity Log) and *CIA banner* (style: SteamGridDB hero + logo, libretro
+  title screen or screenshot, or an image file; preview; jingle).
+- **Injection options**: screen (pixel perfect, recommended, full screen
+  400x240 or a custom size; bilinear filter), bezel, **button mapping** (on
+  a picture of the 3DS: what each button does in the game; the menu keeps
+  the 3DS layout and opens from the touch screen) and **core options** (the
+  core's own option list, value by value).
 
-The toolbar holds **New**, **Open…**, **Save** (builds the CIA), **Save As…**,
-**Settings** and the **Title ID**, which updates live; untick *Auto* to type a
-Unique ID yourself (collisions are flagged). The **Activity** panel at the
-bottom shows what is going on and the log; the status bar shows the file
-being edited and whether the toolchain is ready.
+Projects save themselves as you edit them. Names, publisher and save
+folder follow the database match until you change them.
 
 **Settings** holds everything configured once: default manufacturer, output
 folder, Title ID registry, the SteamGridDB key and filters,
@@ -111,6 +120,7 @@ the toolchain (with overrides) and your own jingle and logo folders.
 3ds-forwarder build ... --core snes9x2005 --folder "SMW" --long-name "Super Mario World"
 3ds-forwarder build ... --icon icon.png --hero hero.png --logo logo.png --platform-logo snes
 3ds-forwarder build ... --bezel snes-frame.png   # top screen bezel
+3ds-forwarder build ... --screen custom:360x240 --smooth   # or pixel_perfect, recommended, full
 3ds-forwarder build --rom game.gb --identify    # names and publisher from the libretro database
 3ds-forwarder identify game.gb                  # what the libretro database says about a ROM
 3ds-forwarder build ... --dry-run               # only print the Title ID and save folder
@@ -189,11 +199,11 @@ git tag v0.3.0 && git push origin v0.3.0
 ```
 src/forwarder3ds/
 ├── cli.py              command line
-├── core/               Title IDs, core and console catalogs, names, settings, paths
+├── core/               Title IDs, catalogs, projects, core options, game settings, paths
 ├── ctr/                3DS formats: CIA reader, SMDH/banner decoders, PNG
 ├── builder/            build pipeline, image/audio preparation, toolchain lookup
 ├── artwork/            SteamGridDB client, banner compositor
-├── gui/                Qt interface (main window, panels, dialogs)
+├── gui/                Qt interface (library, project tabs, dialogs)
 └── data/               cores.json, systems.json, RSF, seed retroarch.cfg, jingles, logos...
 retroarch/              RetroArch patches and core recipes for the bases
 scripts/                maintainer tools: refresh cores.json

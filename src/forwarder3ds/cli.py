@@ -15,6 +15,7 @@ Commands::
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 import tempfile
 from dataclasses import dataclass
@@ -35,6 +36,7 @@ from forwarder3ds.builder.injector import (
 )
 from forwarder3ds.builder.toolchain import find_toolchain
 from forwarder3ds.core import catalog, paths
+from forwarder3ds.core.game_config import ScreenMode, ScreenSettings
 from forwarder3ds.core.logs import get_logger, log_success, setup_console_logging
 from forwarder3ds.artwork.libretro import (
     DatabaseUnavailableError,
@@ -219,9 +221,51 @@ def _request_from_args(args: argparse.Namespace, settings: Settings, scratch: Pa
         audio=jingle or args.audio or (assets.audio if assets else None),
         platform_logo=platform_logo,
         bezel=None if args.no_bezel else (args.bezel or (assets.bezel if assets else None)),
+        screen=_screen(args, loaded.screen if loaded else None),
+        core_options=dict(loaded.core_options) if loaded else {},
+        remap=dict(loaded.remap) if loaded else {},
         manual_unique_id=unique_id,
         replace_existing_id=loaded is not None and unique_id == loaded.unique_id,
     )
+
+
+def _describe_screen(screen: ScreenSettings | None) -> str:
+    if screen is None:
+        return "RetroArch defaults"
+    text = screen.mode.value
+    if screen.mode is ScreenMode.CUSTOM:
+        text += f" {screen.width}x{screen.height}"
+    return text + (", bilinear" if screen.smooth else "")
+
+
+def _screen(args: argparse.Namespace, loaded: ScreenSettings | None) -> ScreenSettings | None:
+    """``--screen``/``--smooth`` over the loaded CIA's screen settings."""
+    if args.screen is None and args.smooth is None:
+        return loaded
+    screen = ScreenSettings(**vars(loaded)) if loaded else ScreenSettings()
+    if args.screen is not None:
+        mode, _sep, size = args.screen.partition(":")
+        screen.mode = ScreenMode(mode)
+        if size:
+            screen.width, screen.height = (int(part) for part in size.lower().split("x"))
+    if args.smooth is not None:
+        screen.smooth = args.smooth
+    return screen
+
+
+def _screen_arg(text: str) -> str:
+    """Validate ``--screen``: a mode, or ``custom:WxH``."""
+    mode, _sep, size = text.partition(":")
+    try:
+        ScreenMode(mode)
+    except ValueError as exc:
+        modes = ", ".join(item.value for item in ScreenMode)
+        raise argparse.ArgumentTypeError(f"unknown mode '{mode}' (one of {modes})") from exc
+    if (mode == ScreenMode.CUSTOM.value) != bool(size) or (
+        size and not re.fullmatch(r"\d{1,3}[xX]\d{1,3}", size)
+    ):
+        raise argparse.ArgumentTypeError("custom needs a size, e.g. custom:360x240")
+    return text
 
 
 def _cmd_build(args: argparse.Namespace, settings: Settings) -> int:
@@ -263,6 +307,9 @@ def _cmd_inspect(args: argparse.Namespace, _settings: Settings) -> int:
         ("Saves", f"sdmc:/saves/{loaded.console}/{loaded.folder}"),
         ("ROM", f"{loaded.rom_name} ({loaded.rom_size} bytes)"),
         ("Bezel", "yes" if loaded.bezel_png else "no"),
+        ("Screen", _describe_screen(loaded.screen)),
+        ("Core options", f"{len(loaded.core_options)} set" if loaded.core_options else "defaults"),
+        ("Controls", ", ".join(f"{k}->{v}" for k, v in loaded.remap.items()) or "default"),
         ("Short name", loaded.short_name),
         ("Long name", loaded.long_name),
         ("Manufacturer", loaded.manufacturer),
@@ -471,6 +518,20 @@ def _add_build_parser(sub: argparse._SubParsersAction) -> None:
         help="top screen bezel, any size (stretched to 400x240; transparent where the game shows)",
     )
     bezel.add_argument("--no-bezel", action="store_true", help="drop the loaded CIA's bezel")
+
+    screen = build.add_argument_group("screen")
+    screen.add_argument(
+        "--screen",
+        type=_screen_arg,
+        metavar="MODE",
+        help="pixel_perfect, recommended (core aspect), full (400x240) or custom:WxH",
+    )
+    screen.add_argument(
+        "--smooth",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="bilinear filtering",
+    )
 
     sound = build.add_argument_group("jingle").add_mutually_exclusive_group()
     sound.add_argument("--jingle", help="catalog name or 16-bit PCM WAV (≤ 3 s)")

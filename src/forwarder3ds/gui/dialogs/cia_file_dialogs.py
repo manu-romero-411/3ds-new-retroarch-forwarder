@@ -1,6 +1,6 @@
-"""Open/Save file pickers for game ``.cia`` files.
+"""Save file picker for game ``.cia`` files.
 
-Thin wrappers over ``QFileDialog`` so the main window does not repeat the
+A thin wrapper over ``QFileDialog`` so the main window does not repeat the
 filters, the fallback directory or the rule that saved files always end in
 ``.cia`` (the extension rule itself lives in ``forwarder3ds.builder.injector``).
 """
@@ -13,21 +13,12 @@ from PySide6.QtWidgets import QDialog, QFileDialog, QMessageBox, QWidget
 
 from forwarder3ds.builder.injector import ensure_cia_extension
 
-_OPEN_FILTER = "CIA files (*.cia);;All files (*)"
 _SAVE_FILTER = "CIA files (*.cia)"
 
 
 def _existing_dir(candidate: Path) -> Path:
     """``candidate`` if it is a directory, else the default save directory."""
     return candidate if candidate.is_dir() else Path.home()
-
-
-def choose_cia_to_open(parent: QWidget, start_dir: Path) -> Path | None:
-    """Ask for a ``.cia`` to load; ``None`` if the user cancelled."""
-    path_str, _filter = QFileDialog.getOpenFileName(
-        parent, "Open game CIA", str(_existing_dir(start_dir)), _OPEN_FILTER
-    )
-    return Path(path_str) if path_str else None
 
 
 def choose_cia_to_save(parent: QWidget, start_dir: Path, default_name: str) -> Path | None:

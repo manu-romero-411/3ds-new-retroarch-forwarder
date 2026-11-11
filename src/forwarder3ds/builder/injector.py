@@ -6,8 +6,10 @@ linked with one core and patched for single-game mode, see
 
 * a flat RomFS holding the ROM as ``game.<ext>``, ``manifest.cfg`` (where
   the game keeps its data on the SD card, plus the fields needed to read
-  the CIA back), the seed ``retroarch.cfg``, the touch screen asset and,
-  optionally, a top screen bezel (``bezel.png`` + its overlay ``bezel.cfg``);
+  the CIA back), the seed ``retroarch.cfg`` (with the game's screen
+  settings), the touch screen asset and, optionally, a top screen bezel
+  (``bezel.png`` + its overlay ``bezel.cfg``), initial core options
+  (``game.opt``) and a control remap (``game.rmp``);
 * an SMDH icon and a banner made by ``bannertool``;
 * a Title ID that is deterministic and collision-checked
   (:mod:`forwarder3ds.core.title_id`).
@@ -28,7 +30,7 @@ from __future__ import annotations
 
 import shutil
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -43,10 +45,13 @@ from forwarder3ds.builder.placeholders import ensure_placeholder_assets
 from forwarder3ds.builder.toolchain import Base, Toolchain, run_tool
 from forwarder3ds.core.archives import ArchiveError, extract, inner_name, is_archive
 from forwarder3ds.core.catalog import validate_platform_logo
+from forwarder3ds.core.core_options import options_file_text
 from forwarder3ds.core.cores import DEFAULT_CORES_JSON, CoreCatalogError, CoreRegistry
+from forwarder3ds.core.game_config import ScreenSettings, remap_text
 from forwarder3ds.core.logs import get_logger, log_success
 from forwarder3ds.core.names import save_folder_name
 from forwarder3ds.core.paths import bundled
+from forwarder3ds.core.projects import Asset, Project
 from forwarder3ds.core.settings import DEFAULT_MANUFACTURER
 from forwarder3ds.core.systems import DEFAULT_SYSTEMS_JSON, SystemCatalog, SystemCatalogError
 from forwarder3ds.core.title_id import (
@@ -63,6 +68,8 @@ _log = get_logger("build")
 CIA_EXTENSION = ".cia"
 FALLBACK_CIA_STEM = "game"
 SMDH_FLAGS = "visible,recordusage"  # without "visible" the HOME menu hides the title
+#: SMDH flags of a title kept out of the Activity Log.
+SMDH_FLAGS_UNRECORDED = "visible"
 
 #: Root of every game's data folder on the SD card.
 SAVES_ROOT = "sdmc:/saves"
@@ -84,6 +91,7 @@ BEZEL_OVERLAY = (
     "overlay0_descs = 0\n"
 )
 CORE_OPTIONS_FILE = "game.opt"
+REMAP_FILE = "game.rmp"
 #: makerom's BasicInfo Title is limited to 64 bytes.
 _RSF_TITLE_MAX = 64
 
@@ -110,7 +118,15 @@ class GameRequest:  # pylint: disable=too-many-instance-attributes
     bezel: Path | None = None
     #: The ROM's own file name; for a ``.zip``, the name of the ROM inside it.
     rom_name: str = ""
+    #: Screen scaling and filtering (``None``: RetroArch's defaults).
+    screen: ScreenSettings | None = None
+    #: Initial core options (key -> value), written as ``game.opt``.
+    core_options: dict[str, str] = field(default_factory=dict)
+    #: Game controls: 3DS button -> RetroPad button (see :mod:`~forwarder3ds.core.game_config`).
+    remap: dict[str, str] = field(default_factory=dict)
     manual_unique_id: int | None = None
+    #: Keep the game out of the HOME menu's Activity Log.
+    hide_from_activity_log: bool = False
     #: Set when rebuilding a CIA loaded from disk under its original Title
     #: ID: lets ``manual_unique_id`` take over an ID that the registry still
     #: attributes to the identity the CIA had before it was edited.
@@ -279,8 +295,11 @@ def manifest_text(request: GameRequest) -> str:
 def seed_config_text(request: GameRequest) -> str:
     """The bundled seed ``retroarch.cfg`` plus the lines that depend on this game."""
     base = bundled(SEED_CONFIG_FILE).read_text(encoding="utf-8")
-    options = f"{request.data_dir}/{CORE_OPTIONS_FILE}"
-    return f"{base.rstrip()}\n\n# --- This game ---\ncore_options_path = {_quote(options)}\n"
+    entries = {"core_options_path": f"{request.data_dir}/{CORE_OPTIONS_FILE}"}
+    if request.screen is not None:
+        entries.update(request.screen.config_lines())
+    lines = [f"{key} = {_quote(value)}" for key, value in entries.items()]
+    return f"{base.rstrip()}\n\n# --- This game ---\n" + "\n".join(lines) + "\n"
 
 
 def write_romfs(directory: Path, request: GameRequest, base: Base) -> Path:
@@ -304,6 +323,15 @@ def write_romfs(directory: Path, request: GameRequest, base: Base) -> Path:
     if request.bezel is not None:
         prepare_bezel(request.bezel, romfs / BEZEL_FILE)
         (romfs / BEZEL_OVERLAY_FILE).write_text(BEZEL_OVERLAY, encoding="utf-8")
+    if request.core_options:
+        for value in request.core_options.values():
+            _quote(value)
+        (romfs / CORE_OPTIONS_FILE).write_text(
+            options_file_text(request.core_options), encoding="utf-8"
+        )
+    remap = remap_text(request.remap)
+    if remap:
+        (romfs / REMAP_FILE).write_text(remap, encoding="utf-8")
     return romfs
 
 
@@ -317,7 +345,8 @@ def _make_smdh_and_banner(
         [
             str(tools.bannertool), "makesmdh",
             "-s", request.short_name, "-l", request.long_name, "-p", request.manufacturer,
-            "-f", SMDH_FLAGS, "-i", str(icon), "-o", str(icon_icn),
+            "-f", SMDH_FLAGS_UNRECORDED if request.hide_from_activity_log else SMDH_FLAGS,
+            "-i", str(icon), "-o", str(icon_icn),
         ],
         "creating the icon",
     )  # fmt: skip
@@ -491,4 +520,32 @@ def make_request(  # pylint: disable=too-many-arguments
         manufacturer=manufacturer.strip() or DEFAULT_MANUFACTURER,
         output=output,
         **extra,
+    )
+
+
+def request_from_project(
+    project: Project, output: Path, systems: SystemCatalog | None = None
+) -> GameRequest:
+    """The :class:`GameRequest` for a saved project, building into ``output``."""
+    long_name = project.long_name.strip() or project.rom_path.stem
+    return make_request(
+        rom=project.rom_path,
+        console=project.console,
+        core=project.core,
+        folder=project.folder,
+        long_name=long_name,
+        short_name=project.short_name,
+        manufacturer=project.publisher,
+        output=output,
+        systems=systems,
+        icon=project.asset(Asset.ICON),
+        banner=project.asset(Asset.BANNER),
+        audio=project.asset(Asset.AUDIO),
+        bezel=project.asset(Asset.BEZEL),
+        screen=project.screen,
+        core_options=dict(project.core_options),
+        remap=dict(project.remap),
+        manual_unique_id=project.unique_id,
+        replace_existing_id=project.unique_id is not None and project.unique_id == project.built_id,
+        hide_from_activity_log=project.hide_from_activity_log,
     )

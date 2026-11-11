@@ -1,233 +1,157 @@
-"""Main window.
+"""Main window: the project library plus one tab per open project.
 
-Layout, from general to specific::
+Layout::
 
-    ┌ toolbar: New · Open… · Save · Save As… · Settings ─────── Title ID ┐
-    │ Game (ROM, console, core, names) │ Presentation (icon, banner, jingle) │ Preview │
+    ┌ toolbar: New project · Import… · Generate CIA · Settings ─────────┐
+    │ [Library] [Game A ×] [Game B ×]                                    │
+    │   library: search, projects by console, batch actions              │
+    │   project: NSUI-style editor (see ProjectEditor)                   │
     ├ Activity: status · busy indicator · log ──────────────────────────┤
-    └ status bar: file being edited · toolchain state ──────────────────┘
+    └ status bar: toolchain state ──────────────────────────────────────┘
 
-Everything that configures the program lives in the Settings window;
-everything about one game lives in the panels. The window owns the
-document workflow (New / Open / Save / Save As, unsaved changes), the core
-and console catalogs and the Title ID registry used for the live Title ID
-preview.
-
-Loading a CIA never patches it: its fields fill the panels, its ROM is
-copied out to a temporary folder, and saving rebuilds it from scratch under
-the Title ID it had.
+Projects save themselves as they are edited, so there is nothing to lose
+when a tab or the window closes. *Generate CIA* builds the current project
+(asking where to save it), or every project ticked in the library (into
+the output folder of the settings), one after the other.
 """
 
 from __future__ import annotations
 
-import shutil
 import tempfile
 from pathlib import Path
 
-from PySide6.QtCore import QByteArray, QSettings, Qt, Slot
+from PySide6.QtCore import QByteArray, QSettings, Qt
 from PySide6.QtGui import QAction, QCloseEvent, QIcon, QKeySequence
 from PySide6.QtWidgets import (
     QDockWidget,
+    QFileDialog,
+    QInputDialog,
     QLabel,
     QMainWindow,
     QMessageBox,
-    QScrollArea,
     QSizePolicy,
-    QSplitter,
     QStyle,
+    QTabWidget,
     QToolBar,
-    QVBoxLayout,
     QWidget,
 )
 
 from forwarder3ds import __version__
-from forwarder3ds.builder.errors import BuildError
-from forwarder3ds.builder.injector import GameRequest, default_cia_filename, make_request
-from forwarder3ds.builder.toolchain import Toolchain, find_toolchain
+from forwarder3ds.builder.injector import default_cia_filename, ensure_cia_extension
 from forwarder3ds.core import paths
-from forwarder3ds.core.cores import DEFAULT_CORES_JSON, CoreCatalogError, CoreRegistry
 from forwarder3ds.core.logs import TagFormatter, get_logger
-from forwarder3ds.core.settings import Settings, load_settings, save_settings
-from forwarder3ds.core.systems import DEFAULT_SYSTEMS_JSON, SystemCatalog, SystemCatalogError
-from forwarder3ds.core.title_id import (
-    GameIdentity,
-    TitleIdCollisionError,
-    TitleIdRegistry,
-    preview_unique_id,
-)
-from forwarder3ds.ctr.cia import CiaReadError, LoadedGame, read_game_cia
+from forwarder3ds.core.names import save_folder_name, suggest_title
+from forwarder3ds.core.projects import PROJECT_EXTENSION, Asset, Project
+from forwarder3ds.core.settings import Settings, save_settings
+from forwarder3ds.ctr.cia import CiaReadError, read_game_cia
 from forwarder3ds.gui.bridge import BuildWorker, QtLogHandler
-from forwarder3ds.gui.dialogs.cia_file_dialogs import choose_cia_to_open, choose_cia_to_save
-from forwarder3ds.gui.dialogs.settings_dialog import (
-    PAGE_STEAMGRIDDB,
-    PAGE_TOOLCHAIN,
-    SettingsDialog,
-)
-from forwarder3ds.gui.document import Document
+from forwarder3ds.gui.context import AppContext
+from forwarder3ds.gui.dialogs.cia_file_dialogs import choose_cia_to_save
+from forwarder3ds.gui.dialogs.settings_dialog import PAGE_TOOLCHAIN, SettingsDialog
+from forwarder3ds.gui.library_page import LibraryPage
+from forwarder3ds.gui.project_editor import ProjectEditor
 from forwarder3ds.gui.widgets.activity import ActivityPanel
-from forwarder3ds.gui.widgets.console_preview import ConsolePreview
-from forwarder3ds.gui.widgets.elided_label import ElidedLabel
-from forwarder3ds.gui.widgets.game_panel import GameFields, GamePanel
-from forwarder3ds.gui.widgets.presentation_panel import PresentationPanel
-from forwarder3ds.gui.widgets.title_id_bar import TitleIdBar
 
 _log = get_logger("gui")
 APP_TITLE = "3DS RetroArch Injector"
-_PREVIEW_MIN_WIDTH = 240
-
-
-def _scrolling(widget: QWidget) -> QScrollArea:
-    """``widget`` in a vertical-only scroll area that never squeezes it horizontally."""
-    area = QScrollArea()
-    area.setWidgetResizable(True)
-    area.setWidget(widget)
-    area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-    area.setMinimumWidth(
-        widget.minimumSizeHint().width()
-        + area.verticalScrollBar().sizeHint().width()
-        + 2 * area.frameWidth()
-    )
-    return area
 
 
 class MainWindow(QMainWindow):  # pylint: disable=too-many-instance-attributes
-    """Game CIA editor plus the file workflow and the build."""
+    """Library, project tabs, settings and the build queue."""
 
-    def __init__(self) -> None:
+    def __init__(self, context: AppContext | None = None) -> None:
         super().__init__()
         self.resize(1280, 820)
-        self._settings = load_settings()
-        self._document = Document()
-        self._tools: Toolchain = find_toolchain(self._settings.toolchain)
-        self._cores: CoreRegistry | None = None
-        self._systems: SystemCatalog | None = None
-        self._registry: TitleIdRegistry | None = None
+        self.setWindowTitle(f"{APP_TITLE} {__version__}")
+        self._context = context or AppContext()
         self._worker: BuildWorker | None = None
-        self._build_dir: Path | None = None
-        # Files extracted from a loaded CIA (its ROM, jingle) while it is the document.
-        self._loaded_dir: Path | None = None
+        self._queue: list[tuple[Project, Path]] = []
+        self._results: list[str] = []
+        self._last_rom_dir = Path.home()
 
-        self._game = GamePanel()
-        self._presentation = PresentationPanel()
-        self._preview = ConsolePreview()
-        self._title_id = TitleIdBar()
+        self._library = LibraryPage(self._context)
+        self._tabs = QTabWidget()
+        self._tabs.setTabsClosable(True)
+        self._tabs.setDocumentMode(True)
+        self._tabs.addTab(self._library, self.tr("Library"))
+        self._tabs.tabBar().setTabButton(0, self._tabs.tabBar().ButtonPosition.RightSide, None)
+        self._tabs.tabCloseRequested.connect(self._close_tab)
+        self.setCentralWidget(self._tabs)
+
         self._activity = ActivityPanel()
-        self._document_label = ElidedLabel()
         self._toolchain_label = QLabel()
         self._toolchain_label.linkActivated.connect(
             lambda _link: self._open_settings(PAGE_TOOLCHAIN)
         )
-        self._file_actions: list[QAction] = []
-
+        self._actions: list[QAction] = []
         self._log_handler = QtLogHandler()
         self._log_handler.setFormatter(TagFormatter(colour=False))
         self._log_handler.emitter.record.connect(self._activity.append_log)
         get_logger().addHandler(self._log_handler)
 
         self._build_toolbar()
-        self._build_central()
         self._build_activity_dock()
-        self.statusBar().addWidget(self._document_label, 1)
         self.statusBar().addPermanentWidget(self._toolchain_label)
-        self._connect_signals()
+        self._library.new_requested.connect(self._new_project)
+        self._library.import_requested.connect(self._import)
+        self._library.open_requested.connect(self._open_projects)
+        self._library.delete_requested.connect(self._delete_projects)
+        self._library.export_requested.connect(self._export_projects)
+        self._library.generate_requested.connect(self._generate_batch)
         self._restore_layout()
-
-        self._apply_settings_to_panels()
-        self._load_catalogs()
-        self._preview.show_artwork(*self._presentation.current_previews())
-        self._refresh_title_id()
-        self._update_title()
+        self._show_toolchain_state()
 
     # ── Construction ─────────────────────────────────────────────────────
 
     def _action(
-        self,
-        text: str,
-        theme: str,
-        fallback: QStyle.StandardPixmap,
-        shortcut: QKeySequence | QKeySequence.StandardKey,
+        self, text: str, theme: str, fallback: QStyle.StandardPixmap, shortcut: QKeySequence
     ) -> QAction:
         icon = QIcon.fromTheme(theme, self.style().standardIcon(fallback))
         action = QAction(icon, text, self)
         action.setShortcut(shortcut)
-        native = QKeySequence(shortcut).toString(QKeySequence.SequenceFormat.NativeText)
+        native = shortcut.toString(QKeySequence.SequenceFormat.NativeText)
         action.setToolTip(f"{text.rstrip('…')} ({native})")
         return action
 
     def _build_toolbar(self) -> None:
         pixmap = QStyle.StandardPixmap
         new = self._action(
-            self.tr("New"), "document-new", pixmap.SP_FileIcon, QKeySequence.StandardKey.New
+            self.tr("New project…"), "document-new", pixmap.SP_FileIcon, QKeySequence("Ctrl+N")
         )
-        open_rom = self._action(
-            self.tr("Open ROM…"),
-            "document-import",
-            pixmap.SP_FileDialogStart,
-            QKeySequence("Ctrl+R"),
+        import_ = self._action(
+            self.tr("Import…"), "document-open", pixmap.SP_DialogOpenButton, QKeySequence("Ctrl+O")
         )
-        open_rom.setToolTip(self.tr("Start a new game from a ROM file (Ctrl+R)"))
-        open_ = self._action(
-            self.tr("Open CIA…"),
-            "document-open",
-            pixmap.SP_DialogOpenButton,
-            QKeySequence.StandardKey.Open,
-        )
-        save = self._action(
-            self.tr("Save"),
+        generate = self._action(
+            self.tr("Generate CIA"),
             "document-save",
             pixmap.SP_DialogSaveButton,
-            QKeySequence.StandardKey.Save,
-        )
-        save_as = self._action(
-            self.tr("Save As…"),
-            "document-save-as",
-            pixmap.SP_DriveFDIcon,
-            QKeySequence.StandardKey.SaveAs,
+            QKeySequence("Ctrl+B"),
         )
         settings = self._action(
             self.tr("Settings"),
             "configure",
             pixmap.SP_FileDialogDetailedView,
-            QKeySequence.StandardKey.Preferences,
+            QKeySequence(QKeySequence.StandardKey.Preferences),
         )
-        save.setToolTip(self.tr("Build the .cia (Ctrl+S)"))
-        new.triggered.connect(self._on_new)
-        open_rom.triggered.connect(self._on_open_rom)
-        open_.triggered.connect(self._on_open)
-        save.triggered.connect(self._on_save)
-        save_as.triggered.connect(self._on_save_as)
-        settings.triggered.connect(self._open_settings_window)
-        self._file_actions = [new, open_rom, open_, save, save_as]
+        new.triggered.connect(self._new_project)
+        import_.triggered.connect(self._import)
+        generate.triggered.connect(self._generate_current)
+        settings.triggered.connect(lambda _checked=False: self._open_settings())
+        self._actions = [new, import_, generate, settings]
 
         toolbar = QToolBar(self.tr("Main"))
         toolbar.setObjectName("main-toolbar")
         toolbar.setMovable(False)
         toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-        for action in self._file_actions:
-            toolbar.addAction(action)
+        toolbar.addAction(new)
+        toolbar.addAction(import_)
         toolbar.addSeparator()
-        toolbar.addAction(settings)
+        toolbar.addAction(generate)
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         toolbar.addWidget(spacer)
-        toolbar.addWidget(self._title_id)
+        toolbar.addAction(settings)
         self.addToolBar(toolbar)
-
-    def _build_central(self) -> None:
-        preview_pane = QWidget()
-        preview_pane.setMinimumWidth(_PREVIEW_MIN_WIDTH)
-        column = QVBoxLayout(preview_pane)
-        column.addWidget(self._preview)
-        column.addStretch(1)
-
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-        splitter.setObjectName("editor-splitter")
-        splitter.addWidget(_scrolling(self._game))
-        splitter.addWidget(_scrolling(self._presentation))
-        splitter.addWidget(preview_pane)
-        splitter.setChildrenCollapsible(False)
-        splitter.setSizes([400, 440, 440])
-        self.setCentralWidget(splitter)
 
     def _build_activity_dock(self) -> None:
         dock = QDockWidget(self.tr("Activity"), self)
@@ -235,345 +159,356 @@ class MainWindow(QMainWindow):  # pylint: disable=too-many-instance-attributes
         dock.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetMovable)
         dock.setWidget(self._activity)
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, dock)
-        self.resizeDocks([dock], [150], Qt.Orientation.Vertical)
+        self.resizeDocks([dock], [140], Qt.Orientation.Vertical)
 
-    def _connect_signals(self) -> None:
-        self._game.changed.connect(self._on_content_changed)
-        self._game.hero_offered.connect(self._presentation.set_hero)
-        self._presentation.changed.connect(self._mark_dirty)
-        self._presentation.previews_changed.connect(self._preview.show_artwork)
-        self._presentation.settings_requested.connect(lambda: self._open_settings(PAGE_STEAMGRIDDB))
-        self._title_id.changed.connect(self._on_content_changed)
-
-    # ── Settings and catalogs ────────────────────────────────────────────
-
-    def _apply_settings_to_panels(self) -> None:
-        general = self._settings.general
-        self._game.set_default_manufacturer(general.manufacturer)
-        self._presentation.set_steamgriddb(self._settings.steamgriddb)
-        self._tools = find_toolchain(self._settings.toolchain)
-        self._game.set_catalogs(self._systems, self._tools.available_cores())
-        if self._tools.complete:
-            self._toolchain_label.setText(self.tr("Toolchain ready"))
-            self._toolchain_label.setToolTip(str(self._tools.makerom.parent))
-        else:
-            self._toolchain_label.setText(
-                self.tr('<a href="#">Toolchain incomplete: {missing}</a>').format(
-                    missing=", ".join(self._tools.missing)
-                )
-            )
-
-    def _load_catalogs(self) -> None:
-        try:
-            self._cores = CoreRegistry.load(DEFAULT_CORES_JSON)
-        except CoreCatalogError as exc:
-            self._cores = None
-            _log.error("%s", exc)
-        try:
-            self._systems = SystemCatalog.load(DEFAULT_SYSTEMS_JSON)
-        except SystemCatalogError as exc:
-            self._systems = None
-            _log.error("%s", exc)
-        self._game.set_catalogs(self._systems, self._tools.available_cores())
-        self._reload_registry()
-
-    def _reload_registry(self) -> None:
-        path = self._settings.general.registry_path
-        try:
-            self._registry = TitleIdRegistry.load(path)
-        except (OSError, ValueError) as exc:
-            self._registry = None
-            _log.error("Cannot read the Title ID registry %s: %s", path, exc)
-
-    @Slot()
-    def _open_settings_window(self) -> None:
-        self._open_settings()
+    # ── Settings ─────────────────────────────────────────────────────────
 
     def _open_settings(self, page: int = 0) -> None:
-        dialog = SettingsDialog(self._settings, self, page=page)
+        dialog = SettingsDialog(self._context.settings, self, page=page)
         dialog.applied.connect(self._apply_settings)
         dialog.exec()
 
-    @Slot(object)
     def _apply_settings(self, settings: Settings) -> None:
-        registry_changed = settings.general.registry != self._settings.general.registry
-        self._settings = settings
+        self._context.settings = settings
         try:
             save_settings(settings)
         except OSError as exc:
             _log.error("Cannot save the settings: %s", exc)
-        self._apply_settings_to_panels()
-        if registry_changed:
-            self._reload_registry()
-            self._refresh_title_id()
+        self._context.reload()
+        for editor in self._editors():
+            editor.refresh_context()
+        self._library.refresh()
+        self._show_toolchain_state()
 
-    # ── Document state ───────────────────────────────────────────────────
-
-    def _update_title(self) -> None:
-        self._document_label.setText(self._document.status_text)
-        self._document_label.setToolTip(str(self._document.path or ""))
-        # "[*]" is where Qt shows the "modified" marker.
-        self.setWindowTitle(f"{self._document.display_name}[*] — {APP_TITLE} {__version__}")
-        self.setWindowModified(self._document.dirty)
-
-    def _mark_dirty(self) -> None:
-        if not self._document.dirty:
-            self._document.dirty = True
-            self._update_title()
-
-    def _on_content_changed(self) -> None:
-        self._presentation.set_long_name(self._game.fields().long_name)
-        self._refresh_title_id()
-        self._mark_dirty()
-
-    def _replaces_document_id(self, manual_unique_id: int | None) -> bool:
-        """Whether ``manual_unique_id`` is the Title ID this document already has.
-
-        Only then may the registry's entry for the document's previous
-        contents be superseded (see ``GameRequest.replace_existing_id``).
-        """
-        return manual_unique_id is not None and manual_unique_id == self._document.unique_id
-
-    def _request(self, output: Path, **extra: object) -> GameRequest | None:
-        """The panels as a :class:`GameRequest`, or ``None`` while incomplete."""
-        fields = self._game.fields()
-        if not (fields.rom and fields.console and fields.core and fields.long_name):
-            return None
-        try:
-            return make_request(
-                rom=Path(fields.rom),
-                console=fields.console,
-                core=fields.core,
-                folder=fields.folder,
-                long_name=fields.long_name,
-                short_name=fields.short_name,
-                manufacturer=fields.manufacturer,
-                output=output,
-                bezel=Path(fields.bezel) if fields.bezel else None,
-                systems=self._systems,
-                **extra,
-            )
-        except BuildError:
-            return None
-
-    def _identity(self) -> GameIdentity | None:
-        request = self._request(Path())
-        return request.identity() if request else None
-
-    def _unique_id_problem(self) -> tuple[int | None, str | None]:
-        """``(unique_id, None)``, ``(None, error)`` or ``(None, None)`` if incomplete."""
-        identity = self._identity()
-        if identity is None or self._registry is None or self._cores is None:
-            return None, None
-        manual = self._title_id.manual_unique_id()
-        try:
-            unique_id = preview_unique_id(
-                identity,
-                self._cores.all_unique_ids(),
-                self._registry,
-                manual,
-                self._replaces_document_id(manual),
-            )
-        except TitleIdCollisionError as exc:
-            return None, str(exc)
-        return unique_id, None
-
-    def _refresh_title_id(self) -> None:
-        unique_id, error = self._unique_id_problem()
-        if error:
-            self._title_id.show_error(error)
-        elif unique_id is None:
-            self._title_id.show_incomplete()
+    def _show_toolchain_state(self) -> None:
+        tools = self._context.tools
+        if tools is not None and tools.complete:
+            self._toolchain_label.setText(self.tr("Toolchain ready"))
         else:
-            self._title_id.show_unique_id(unique_id)
+            missing = ", ".join(tools.missing) if tools else "?"
+            self._toolchain_label.setText(
+                self.tr('<a href="#">Toolchain incomplete: {missing}</a>').format(missing=missing)
+            )
 
-    def _confirm_discard(self, intent: str) -> bool:
-        """Ask before throwing away unsaved edits; ``intent`` completes the question."""
-        if not self._document.dirty:
-            return True
+    # ── Tabs ─────────────────────────────────────────────────────────────
+
+    def _editors(self) -> list[ProjectEditor]:
+        return [
+            widget
+            for index in range(self._tabs.count())
+            if isinstance(widget := self._tabs.widget(index), ProjectEditor)
+        ]
+
+    def _editor_for(self, project_id: str) -> ProjectEditor | None:
+        return next((e for e in self._editors() if e.project.id == project_id), None)
+
+    def _open_projects(self, projects: list[Project]) -> None:
+        for project in projects:
+            editor = self._editor_for(project.id)
+            if editor is None:
+                editor = ProjectEditor(self._context, project)
+                editor.saved.connect(lambda e=editor: self._on_project_saved(e))
+                self._tabs.addTab(editor, project.title)
+            self._tabs.setCurrentWidget(editor)
+
+    def _on_project_saved(self, editor: ProjectEditor) -> None:
+        index = self._tabs.indexOf(editor)
+        if index >= 0:
+            self._tabs.setTabText(index, editor.project.title)
+        self._library.refresh()
+
+    def _close_tab(self, index: int) -> None:
+        editor = self._tabs.widget(index)
+        if isinstance(editor, ProjectEditor):
+            editor.save()
+            self._tabs.removeTab(index)
+            editor.deleteLater()
+
+    # ── New / import / export / delete ───────────────────────────────────
+
+    def _rom_filter(self) -> str:
+        systems = self._context.systems
+        extensions = sorted({ext for system in systems or [] for ext in system.extensions})
+        patterns = " ".join(f"*.{ext}" for ext in [*extensions, "zip"])
+        return self.tr("ROMs ({patterns});;All files (*)").format(patterns=patterns)
+
+    def _new_project(self) -> None:
+        path_text, _filter = QFileDialog.getOpenFileName(
+            self, self.tr("Choose the ROM"), str(self._last_rom_dir), self._rom_filter()
+        )
+        if not path_text:
+            return
+        rom = Path(path_text)
+        self._last_rom_dir = rom.parent
+        console = self._ask_console(rom)
+        if not console:
+            return
+        system = self._context.systems.get(console) if self._context.systems else None
+        title = suggest_title(rom.name)
+        project = self._context.store.create(
+            rom,
+            console,
+            core=system.core if system else "",
+            long_name=title,
+            folder=save_folder_name(title),
+        )
+        _log.info("New project “%s” (%s)", project.title, console)
+        self._library.refresh()
+        self._open_projects([project])
+
+    def _ask_console(self, rom: Path) -> str:
+        systems = self._context.systems
+        if systems is None:
+            return ""
+        guessed = systems.guess(rom)
+        if guessed is not None:
+            return guessed.console
+        candidates = systems.candidates(rom) or sorted(systems, key=lambda s: s.name.casefold())
+        names = [f"{system.name} ({system.console})" for system in candidates]
+        if not names:
+            return ""
+        choice, ok = QInputDialog.getItem(
+            self,
+            self.tr("Console"),
+            self.tr("Which console is '{name}' for?").format(name=rom.name),
+            names,
+            0,
+            False,
+        )
+        return candidates[names.index(choice)].console if ok else ""
+
+    def _import(self) -> None:
+        path_text, _filter = QFileDialog.getOpenFileName(
+            self,
+            self.tr("Import"),
+            str(self._context.settings.general.output_path),
+            self.tr("Projects or game CIAs (*{ext} *.zip *.cia);;All files (*)").format(
+                ext=PROJECT_EXTENSION
+            ),
+        )
+        if not path_text:
+            return
+        path = Path(path_text)
+        try:
+            if path.suffix.lower() == ".cia":
+                projects = [self._import_cia(path)]
+            else:
+                projects = self._context.store.import_archive(path)
+        except (OSError, ValueError, CiaReadError) as exc:
+            _log.error("Cannot import %s: %s", path.name, exc)
+            QMessageBox.critical(self, APP_TITLE, str(exc))
+            return
+        _log.info("Imported %d project(s) from %s", len(projects), path.name)
+        self._library.refresh()
+        self._open_projects(projects)
+
+    def _import_cia(self, path: Path) -> Project:
+        """A new project from a game CIA built by this tool (its ROM is copied out)."""
+        loaded = read_game_cia(path)
+        store = self._context.store
+        project = store.create(
+            Path(loaded.rom_name),
+            loaded.console,
+            core=loaded.core,
+            folder=loaded.folder,
+            long_name=loaded.long_name,
+            short_name=loaded.short_name,
+            publisher=loaded.manufacturer,
+            unique_id=loaded.unique_id,
+            built_id=loaded.unique_id,
+            output=str(path),
+            core_options=dict(loaded.core_options),
+            remap=dict(loaded.remap),
+        )
+        if loaded.screen is not None:
+            project.screen = loaded.screen
+        assert project.directory is not None
+        project.rom = str(loaded.extract_rom(project.directory / "rom"))
+        with tempfile.TemporaryDirectory(prefix="3ds-injector-import-") as scratch:
+            assets = loaded.write_assets(Path(scratch))
+            for kind, source in (
+                (Asset.ICON, assets.icon),
+                (Asset.BANNER, assets.banner),
+                (Asset.AUDIO, assets.audio),
+                (Asset.BEZEL, assets.bezel),
+            ):
+                if source is not None:
+                    store.set_asset(project, kind, source)
+        store.save(project)
+        for warning in loaded.warnings:
+            _log.warning("%s", warning)
+        return project
+
+    def _export_projects(self, projects: list[Project]) -> None:
+        if not projects:
+            return
+        name = save_folder_name(projects[0].title) if len(projects) == 1 else "projects"
+        path_text, _filter = QFileDialog.getSaveFileName(
+            self,
+            self.tr("Export projects"),
+            str(Path.home() / f"{name}{PROJECT_EXTENSION}"),
+            self.tr("Project exports (*{ext})").format(ext=PROJECT_EXTENSION),
+        )
+        if not path_text:
+            return
+        for editor in self._editors():
+            editor.save()
+        try:
+            self._context.store.export(projects, Path(path_text))
+        except OSError as exc:
+            _log.error("Cannot export: %s", exc)
+            QMessageBox.critical(self, APP_TITLE, str(exc))
+            return
+        _log.info("Exported %d project(s) to %s (ROMs not included)", len(projects), path_text)
+
+    def _delete_projects(self, projects: list[Project]) -> None:
+        if not projects:
+            return
+        names = "\n".join(f"• {project.title}" for project in projects[:10])
+        more = "\n…" if len(projects) > 10 else ""
         answer = QMessageBox.question(
             self,
             APP_TITLE,
-            self.tr("There are unsaved changes.\nDiscard them and {intent}?").format(intent=intent),
-            QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel,
-            QMessageBox.StandardButton.Cancel,
+            self.tr("Delete these projects? Their ROMs and CIAs are kept.\n\n{names}").format(
+                names=names + more
+            ),
         )
-        return answer == QMessageBox.StandardButton.Discard
-
-    def _discard_loaded_files(self) -> None:
-        if self._loaded_dir is not None:
-            shutil.rmtree(self._loaded_dir, ignore_errors=True)
-            self._loaded_dir = None
-
-    def _set_busy(self, busy: bool) -> None:
-        for action in self._file_actions:
-            action.setEnabled(not busy)
-        self.centralWidget().setEnabled(not busy)
-        self._title_id.setEnabled(not busy)
-        self._activity.set_busy(busy, self.tr("Building…") if busy else "")
-
-    # ── New / Open ───────────────────────────────────────────────────────
-
-    def _on_open_rom(self) -> None:
-        if not self._confirm_discard(self.tr("start a new game")):
+        if answer != QMessageBox.StandardButton.Yes:
             return
-        self._start_new_document()
-        self._game.browse_rom()
+        for project in projects:
+            editor = self._editor_for(project.id)
+            if editor is not None:
+                self._tabs.removeTab(self._tabs.indexOf(editor))
+                editor.deleteLater()
+            self._context.store.delete(project)
+        self._library.refresh()
 
-    def _on_new(self) -> None:
-        if not self._confirm_discard(self.tr("start a new game")):
+    # ── Building ─────────────────────────────────────────────────────────
+
+    def _generate_current(self) -> None:
+        editor = self._tabs.currentWidget()
+        if isinstance(editor, ProjectEditor):
+            self._generate_one(editor)
+        else:
+            self._generate_batch(self._library.chosen())
+
+    def _generate_one(self, editor: ProjectEditor) -> None:
+        editor.save()
+        if not self._check(editor):
             return
-        self._start_new_document()
+        project = editor.project
+        start = Path(project.output).parent if project.output else self._output_dir()
+        name = Path(project.output).name if project.output else default_cia_filename(project.title)
+        output = choose_cia_to_save(self, start, name)
+        if output is not None:
+            self._start([(project, ensure_cia_extension(output))])
 
-    def _start_new_document(self) -> None:
-        self._discard_loaded_files()
-        self._game.reset()
-        self._presentation.reset()
-        self._title_id.set_auto()
-        self._document.reset()
-        self._refresh_title_id()
-        self._update_title()
-        self._activity.set_status(self.tr("New game"))
-
-    def _start_dir(self) -> Path:
-        if self._document.path is not None:
-            return self._document.path.parent
-        return self._settings.general.output_path
-
-    def _on_open(self) -> None:
-        path = choose_cia_to_open(self, self._start_dir())
-        if path is None:
+    def _generate_batch(self, projects: list[Project]) -> None:
+        if not projects:
             return
-        # Read before asking about unsaved changes, so a bad file costs nothing.
-        try:
-            loaded = read_game_cia(path)
-        except (CiaReadError, OSError) as exc:
-            _log.error("%s: %s", path.name, exc)
-            QMessageBox.critical(
+        jobs, problems = [], []
+        for project in projects:
+            editor = self._editor_for(project.id)
+            if editor is not None:
+                editor.save()
+                project = editor.project
+            problem = self._context.problem(project)
+            if problem:
+                problems.append(f"• {project.title}: {problem}")
+                continue
+            output = self._output_dir() / default_cia_filename(project.title)
+            jobs.append((project, output))
+        if problems:
+            QMessageBox.warning(
                 self,
                 APP_TITLE,
-                self.tr("Could not open '{name}':\n\n{error}").format(name=path.name, error=exc),
+                self.tr("These projects cannot be built yet:\n\n{list}").format(
+                    list="\n".join(problems)
+                ),
             )
-            return
-        if self._confirm_discard(self.tr("open '{name}'").format(name=path.name)):
-            self._apply_loaded(loaded, path)
+        if jobs:
+            self._start(jobs)
 
-    def _apply_loaded(self, loaded: LoadedGame, path: Path) -> None:
-        self._discard_loaded_files()
-        self._loaded_dir = Path(tempfile.mkdtemp(prefix="3ds-injector-loaded-"))
-        assets = loaded.write_assets(self._loaded_dir)
-        try:
-            rom = loaded.extract_rom(self._loaded_dir / "rom")
-        except CiaReadError as exc:
-            _log.error("%s: %s", path.name, exc)
-            QMessageBox.critical(self, APP_TITLE, str(exc))
-            return
-        self._game.set_fields(
-            GameFields(
-                rom=str(rom),
-                console=loaded.console,
-                core=loaded.core,
-                folder=loaded.folder,
-                short_name=loaded.short_name,
-                long_name=loaded.long_name,
-                manufacturer=loaded.manufacturer,
-                bezel=str(assets.bezel) if assets.bezel else "",
-            )
-        )
-        self._presentation.load_from_cia(
-            loaded.icon_png, loaded.banner_png, assets.audio, self.tr("From the CIA")
-        )
-        # The loaded Title ID is kept, not re-derived from the (editable) fields.
-        self._title_id.set_manual_unique_id(loaded.unique_id)
-        self._document.bind(path, loaded.unique_id)
-        self._refresh_title_id()
-        self._update_title()
-        _log.info("Opened %s (Title ID 0x%016X)", path, loaded.title_id)
-        for warning in loaded.warnings:
-            _log.warning("%s", warning)
+    def _output_dir(self) -> Path:
+        return self._context.settings.general.output_path
 
-    # ── Save / Save As ───────────────────────────────────────────────────
-
-    def _check_ready(self) -> bool:
-        """Tell the user (and return ``False``) if a build cannot start."""
-        problem = self._game.missing()
-        if problem is None:
-            problem = self._unique_id_problem()[1]
-        if problem is None and not self._tools.complete:
+    def _check(self, editor: ProjectEditor) -> bool:
+        problem = self._context.problem(editor.project)
+        tools = self._context.tools
+        if problem is None and (tools is None or not tools.complete):
             problem = self.tr(
                 "The toolchain is incomplete (missing: {missing}). See Settings › Toolchain."
-            ).format(missing=", ".join(self._tools.missing))
+            ).format(missing=", ".join(tools.missing) if tools else "?")
         if problem:
             _log.warning("%s", problem)
             QMessageBox.warning(self, APP_TITLE, problem)
             return False
         return True
 
-    def _ask_save_path(self) -> Path | None:
-        name = default_cia_filename(self._game.fields().long_name)
-        return choose_cia_to_save(self, self._start_dir(), name)
+    def _set_busy(self, busy: bool, status: str = "") -> None:
+        for action in self._actions:
+            action.setEnabled(not busy)
+        self._tabs.setEnabled(not busy)
+        self._activity.set_busy(busy, status)
 
-    def _on_save(self) -> None:
-        """Replace the open CIA, or behave like *Save As* if there is no file yet."""
-        if not self._check_ready():
+    def _start(self, jobs: list[tuple[Project, Path]]) -> None:
+        tools = self._context.tools
+        if tools is None or not tools.complete:
+            self._check_toolchain_message()
             return
-        path = self._document.path or self._ask_save_path()
-        if path is not None:
-            self._start_build(path)
+        self._queue = list(jobs)
+        self._results = []
+        self._next_build()
 
-    def _on_save_as(self) -> None:
-        if not self._check_ready():
-            return
-        path = self._ask_save_path()
-        if path is not None:
-            self._start_build(path)
-
-    def _start_build(self, output: Path) -> None:
-        fields = self._game.fields()
-        manual = self._title_id.manual_unique_id()
-        self._build_dir = Path(tempfile.mkdtemp(prefix="3ds-injector-ui-"))
-        icon, banner = self._presentation.write_build_images(self._build_dir)
-        request = self._request(
-            output,
-            icon=icon,
-            banner=banner,
-            audio=self._presentation.jingle_path(),
-            platform_logo=self._presentation.platform_logo_path(),
-            manual_unique_id=manual,
-            replace_existing_id=self._replaces_document_id(manual),
+    def _check_toolchain_message(self) -> None:
+        tools = self._context.tools
+        missing = ", ".join(tools.missing) if tools else "?"
+        QMessageBox.warning(
+            self,
+            APP_TITLE,
+            self.tr("The toolchain is incomplete (missing: {missing}).").format(missing=missing),
         )
-        if request is None:  # _check_ready() makes this unreachable
-            shutil.rmtree(self._build_dir, ignore_errors=True)
-            self._build_dir = None
+
+    def _next_build(self) -> None:
+        if not self._queue:
+            self._set_busy(False, self.tr("Done") if self._results else "")
+            if len(self._results) > 1:
+                QMessageBox.information(self, APP_TITLE, "\n".join(self._results))
             return
-        _log.info("Building “%s” → %s", fields.long_name, output)
-        self._set_busy(True)
-        self._worker = BuildWorker(request, self._tools, self._settings.general.registry_path, self)
-        self._worker.succeeded.connect(self._on_build_succeeded)
-        self._worker.failed.connect(self._on_build_failed)
-        self._worker.finished.connect(self._on_build_finished)
-        self._worker.start()
+        project, output = self._queue.pop(0)
+        request = self._context.request(project, output)
+        tools = self._context.tools
+        if request is None or tools is None:
+            self._results.append(f"✗ {project.title}: incomplete")
+            self._next_build()
+            return
+        self._set_busy(True, self.tr("Building {name}…").format(name=project.title))
+        _log.info("Building “%s” → %s", project.title, output)
+        worker = BuildWorker(request, tools, self._context.settings.general.registry_path, self)
+        worker.succeeded.connect(lambda unique_id, path, p=project: self._built(p, unique_id, path))
+        worker.failed.connect(lambda message, p=project: self._failed(p, message))
+        worker.finished.connect(self._next_build)
+        self._worker = worker
+        worker.start()
 
-    def _on_build_finished(self) -> None:
-        if self._build_dir is not None:
-            shutil.rmtree(self._build_dir, ignore_errors=True)
-            self._build_dir = None
-        self._set_busy(False)
-
-    def _on_build_succeeded(self, unique_id: int, output: Path) -> None:
-        self._document.bind(output, unique_id)
-        # From now on this file *is* that Title ID: pin it, so that editing and
-        # saving again replaces the CIA. Ticking "Auto" opts back out.
-        self._title_id.set_manual_unique_id(unique_id)
-        self._reload_registry()  # the build recorded the ID
-        self._refresh_title_id()
-        self._update_title()
+    def _built(self, project: Project, unique_id: int, output: Path) -> None:
+        self._context.reload_registry()
+        editor = self._editor_for(project.id)
+        if editor is not None:
+            editor.built(unique_id, output)
+        else:
+            project.unique_id = project.built_id = unique_id
+            project.output = str(output)
+            self._context.store.save(project)
+        self._results.append(f"✔ {project.title} → {output.name}")
         self._activity.set_status(self.tr("Saved {name}").format(name=output.name))
+        self._library.refresh()
 
-    def _on_build_failed(self, message: str) -> None:
-        _log.error("%s", message)
-        self._activity.set_status(self.tr("Build failed"))
-        QMessageBox.critical(self, APP_TITLE, message)
+    def _failed(self, project: Project, message: str) -> None:
+        _log.error("%s: %s", project.title, message)
+        self._results.append(f"✗ {project.title}: {message}")
+        if not self._queue and len(self._results) == 1:
+            QMessageBox.critical(self, APP_TITLE, message)
 
     # ── Layout persistence and closing ───────────────────────────────────
 
@@ -583,35 +518,27 @@ class MainWindow(QMainWindow):  # pylint: disable=too-many-instance-attributes
 
     def _restore_layout(self) -> None:
         state = self._ui_state()
-        splitter = self.centralWidget()
         for key, restore in (
             ("window/geometry", self.restoreGeometry),
             ("window/state", self.restoreState),
-            ("editor/splitter", splitter.restoreState),
         ):
             value = state.value(key)
             if isinstance(value, QByteArray):
                 restore(value)
 
-    def _save_layout(self) -> None:
-        state = self._ui_state()
-        state.setValue("window/geometry", self.saveGeometry())
-        state.setValue("window/state", self.saveState())
-        state.setValue("editor/splitter", self.centralWidget().saveState())
-        state.sync()
-
     def closeEvent(self, event: QCloseEvent) -> None:  # pylint: disable=invalid-name
-        """Refuse while building, confirm unsaved changes, remember the layout."""
+        """Refuse while building; save the open projects and the layout."""
         if self._worker is not None and self._worker.isRunning():
             QMessageBox.information(
                 self, APP_TITLE, self.tr("A build is running. Wait for it to finish.")
             )
             event.ignore()
             return
-        if not self._confirm_discard(self.tr("quit")):
-            event.ignore()
-            return
-        self._save_layout()
-        self._discard_loaded_files()
+        for editor in self._editors():
+            editor.save()
+        state = self._ui_state()
+        state.setValue("window/geometry", self.saveGeometry())
+        state.setValue("window/state", self.saveState())
+        state.sync()
         get_logger().removeHandler(self._log_handler)
         super().closeEvent(event)

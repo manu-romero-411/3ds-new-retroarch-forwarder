@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import re
 import struct
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import BinaryIO
 
@@ -29,6 +29,7 @@ from forwarder3ds.ctr.assets import (
     decode_banner_image,
     parse_smdh,
 )
+from forwarder3ds.core.game_config import ScreenSettings, parse_remap
 from forwarder3ds.core.title_id import title_id_to_unique_id, unique_id_to_title_id
 
 
@@ -91,6 +92,11 @@ _MANIFEST_KEYS = ("content", "core", "console", "game")
 _MAX_TEXT_FILE_SIZE = 4096
 _MAX_EXEFS_FILE_SIZE = 8 * 1024 * 1024
 BEZEL_FILE = "bezel.png"
+CONFIG_FILE = "retroarch.cfg"
+CORE_OPTIONS_FILE = "game.opt"
+REMAP_FILE = "game.rmp"
+#: Upper bound for the seed config, core options and remap files.
+_MAX_SETTINGS_FILE_SIZE = 256 * 1024
 _MAX_BEZEL_SIZE = 4 * 1024 * 1024
 _COPY_CHUNK = 1024 * 1024
 
@@ -137,6 +143,9 @@ class LoadedGame:  # pylint: disable=too-many-instance-attributes
     banner_png: bytes | None = None
     audio_wav: bytes | None = None
     bezel_png: bytes | None = None
+    screen: ScreenSettings | None = None
+    core_options: dict[str, str] = field(default_factory=dict)
+    remap: dict[str, str] = field(default_factory=dict)
     warnings: tuple[str, ...] = ()
 
     @property
@@ -352,6 +361,20 @@ def _read_manifest(handle: BinaryIO, files: dict[str, _RomFsFile]) -> dict[str, 
     return manifest
 
 
+def _read_settings(handle: BinaryIO, files: dict[str, _RomFsFile], name: str) -> dict[str, str]:
+    """``key = "value"`` lines of RomFS file ``name`` (empty if it is missing or too big)."""
+    entry = files.get(name)
+    if entry is None or entry.size > _MAX_SETTINGS_FILE_SIZE:
+        return {}
+    text = _read_exact(handle, entry.offset, entry.size, name).decode("utf-8", "replace")
+    values = {}
+    for line in text.splitlines():
+        match = _MANIFEST_LINE.match(line)
+        if match:
+            values[match.group(1)] = match.group(2)
+    return values
+
+
 def _decode_assets(
     icon_blob: bytes | None, banner_blob: bytes | None
 ) -> tuple[str, str, str, bytes | None, bytes | None, bytes | None, list[str]]:
@@ -409,6 +432,9 @@ def read_game_cia(path: Path) -> LoadedGame:
                 if bezel is not None and bezel.size <= _MAX_BEZEL_SIZE
                 else None
             )
+            config = _read_settings(handle, files, CONFIG_FILE)
+            core_options = _read_settings(handle, files, CORE_OPTIONS_FILE)
+            remap = parse_remap(_read_settings(handle, files, REMAP_FILE))
             icon_blob = _read_exefs_file(handle, ncch, ICON_FILE)
             banner_blob = _read_exefs_file(handle, ncch, BANNER_FILE)
     except OSError as exc:
@@ -432,5 +458,8 @@ def read_game_cia(path: Path) -> LoadedGame:
         banner_png=banner_png,
         audio_wav=audio_wav,
         bezel_png=bezel_png,
+        screen=ScreenSettings.from_config(config) if config else None,
+        core_options=core_options,
+        remap=remap,
         warnings=tuple(warnings),
     )

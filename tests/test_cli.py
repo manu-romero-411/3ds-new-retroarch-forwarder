@@ -95,8 +95,11 @@ def test_pick_game() -> None:
 def test_build_and_read_back(rom: Path, tmp_path: Path) -> None:
     """End to end: build a CIA, read it back, rebuild it keeping its Title ID."""
     out = tmp_path / "game.cia"
-    assert main([*build_args(rom), "--jingle", "smw_coin", "-o", str(out)]) == 0
+    args = [*build_args(rom), "--jingle", "smw_coin", "--screen", "custom:360x240", "--smooth"]
+    assert main([*args, "-o", str(out)]) == 0
     loaded = read_game_cia(out)
+    assert loaded.screen is not None and loaded.screen.smooth
+    assert (loaded.screen.mode.value, loaded.screen.width) == ("custom", 360)
     assert (loaded.core, loaded.console, loaded.folder, loaded.long_name) == (
         "snes9x2005",
         "snes",
@@ -110,3 +113,4 @@ def test_build_and_read_back(rom: Path, tmp_path: Path) -> None:
     rebuilt = read_game_cia(out)
     assert rebuilt.unique_id == loaded.unique_id
     assert rebuilt.short_name == "G"
+    assert rebuilt.screen == loaded.screen

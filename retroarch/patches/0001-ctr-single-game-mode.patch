@@ -9,10 +9,14 @@ Once the content is loaded, a bezel.png from data_dir (or the RomFS) is
 shown as a full screen overlay. Stock behaviour is unchanged for CIAs
 without that file.
 
+The RomFS can also seed the game's core options (game.opt) and control
+remap (game.rmp, put where RetroArch looks for it: <core name>/game.rmp)
+the same way retroarch.cfg seeds the config.
+
 Applies to RetroArch v1.22.2 (RETROARCH_REF in versions.env).
 
 diff --git a/frontend/drivers/platform_ctr.c b/frontend/drivers/platform_ctr.c
-index ef1459e8..b38ea588 100644
+index ef1459e8..36a9efb4 100644
 --- a/frontend/drivers/platform_ctr.c
 +++ b/frontend/drivers/platform_ctr.c
 @@ -16,6 +16,7 @@
@@ -41,7 +45,7 @@ index ef1459e8..b38ea588 100644
  #include "../../verbosity.h"
  
  #include "ctr/ctr_debug.h"
-@@ -95,6 +100,180 @@ static void get_first_valid_core(char* path_return, size_t len)
+@@ -95,6 +100,208 @@ static void get_first_valid_core(char* path_return, size_t len)
  }
  #endif
  
@@ -58,6 +62,8 @@ index ef1459e8..b38ea588 100644
 + *   manifest.cfg      content, data_dir, optional system_dir (+ metadata)
 + *   game.<ext>        the content
 + *   retroarch.cfg     seeds data_dir/retroarch.cfg on first boot
++ *   game.opt          seeds data_dir/game.opt (core options), optional
++ *   game.rmp          seeds the game's control remap, optional
 + *   bottom_menu.png   touch screen menu asset, optional
 + *   bezel.png         top screen bezel, optional (+ bezel.cfg, its overlay)
 + *
@@ -66,7 +72,8 @@ index ef1459e8..b38ea588 100644
 + */
 +#define CTR_INJECTED_ROOT     "romfs:/"
 +#define CTR_INJECTED_MANIFEST CTR_INJECTED_ROOT "manifest.cfg"
-+#define CTR_INJECTED_BASE_CFG CTR_INJECTED_ROOT "retroarch.cfg"
++#define CTR_INJECTED_OPTIONS  "game.opt"
++#define CTR_INJECTED_REMAP    "game.rmp"
 +#define CTR_INJECTED_BOTTOM   CTR_INJECTED_ROOT "bottom_menu.png"
 +#define CTR_BEZEL_IMAGE       "bezel.png"
 +#define CTR_BEZEL_OVERLAY     "bezel.cfg"
@@ -86,20 +93,43 @@ index ef1459e8..b38ea588 100644
 +   strlcpy(g_defaults.dirs[type], dir, sizeof(g_defaults.dirs[type]));
 +}
 +
-+static void ctr_injected_seed_config(void)
++/* Copies romfs:/<name> to dir/<name> unless that one exists: the RomFS
++ * holds the game's initial settings, the SD card copy is the user's. */
++static void ctr_injected_seed(const char *dir, const char *name)
 +{
++   char src[PATH_MAX_LENGTH];
++   char dst[PATH_MAX_LENGTH];
 +   void *buf   = NULL;
 +   int64_t len = 0;
 +
-+   if (path_is_valid(g_defaults.path_config)
-+         || !path_is_valid(CTR_INJECTED_BASE_CFG))
++   fill_pathname_join(src, CTR_INJECTED_ROOT, name, sizeof(src));
++   fill_pathname_join(dst, dir, name, sizeof(dst));
++   if (path_is_valid(dst) || !path_is_valid(src))
 +      return;
 +
-+   if (filestream_read_file(CTR_INJECTED_BASE_CFG, &buf, &len) && buf)
++   if (filestream_read_file(src, &buf, &len) && buf)
 +   {
-+      filestream_write_file(g_defaults.path_config, buf, len);
++      filestream_write_file(dst, buf, len);
 +      free(buf);
 +   }
++}
++
++/* RetroArch looks a game's remap up in <remap dir>/<core name>/<content
++ * name>.rmp; the core is linked in, so its name is known before it loads. */
++static void ctr_injected_seed_remap(const char *data_dir)
++{
++   char dir[PATH_MAX_LENGTH];
++   struct retro_system_info info;
++
++   if (!path_is_valid(CTR_INJECTED_ROOT CTR_INJECTED_REMAP))
++      return;
++   memset(&info, 0, sizeof(info));
++   retro_get_system_info(&info);
++   if (string_is_empty(info.library_name))
++      return;
++   fill_pathname_join(dir, data_dir, info.library_name, sizeof(dir));
++   path_mkdir(dir);
++   ctr_injected_seed(dir, CTR_INJECTED_REMAP);
 +}
 +
 +/* Returns true if this CIA is a single-game build and sets it up. */
@@ -155,7 +185,9 @@ index ef1459e8..b38ea588 100644
 +
 +   fill_pathname_join(g_defaults.path_config, data_dir,
 +         FILE_PATH_MAIN_CONFIG, sizeof(g_defaults.path_config));
-+   ctr_injected_seed_config();
++   ctr_injected_seed(data_dir, FILE_PATH_MAIN_CONFIG);
++   ctr_injected_seed(data_dir, CTR_INJECTED_OPTIONS);
++   ctr_injected_seed_remap(data_dir);
 +
 +   fill_pathname_join(ctr_injected_content, CTR_INJECTED_ROOT, content,
 +         sizeof(ctr_injected_content));
@@ -222,7 +254,7 @@ index ef1459e8..b38ea588 100644
  static void frontend_ctr_get_env(int* argc, char* argv[],
        void* args, void* params_data)
  {
-@@ -138,6 +317,12 @@ static void frontend_ctr_get_env(int* argc, char* argv[],
+@@ -138,6 +345,12 @@ static void frontend_ctr_get_env(int* argc, char* argv[],
                        "ctr", sizeof(g_defaults.dirs[DEFAULT_DIR_BOTTOM_ASSETS]));
  
  #ifndef IS_SALAMANDER
@@ -235,7 +267,7 @@ index ef1459e8..b38ea588 100644
     dir_check_defaults("custom.ini");
  #endif
  }
-@@ -188,6 +373,12 @@ static void frontend_ctr_deinit(void* data)
+@@ -188,6 +401,12 @@ static void frontend_ctr_deinit(void* data)
     gfxTopRightFramebuffers[0] = NULL;
     gfxTopRightFramebuffers[1] = NULL;
     gfxExit();
@@ -248,7 +280,7 @@ index ef1459e8..b38ea588 100644
  #endif
  }
  
-@@ -632,7 +823,11 @@ frontend_ctx_driver_t frontend_ctx_ctr =
+@@ -632,7 +851,11 @@ frontend_ctx_driver_t frontend_ctx_ctr =
     frontend_ctr_init,            /* init                           */
     frontend_ctr_deinit,          /* deinit                         */
     frontend_ctr_exitspawn,       /* exitspawn                      */

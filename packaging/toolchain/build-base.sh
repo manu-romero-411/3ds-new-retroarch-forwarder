@@ -10,6 +10,7 @@
 #   OUT_DIR/bases/<CORE>/base.env        system mode and source revisions
 #   OUT_DIR/bases/<CORE>/{icon,banner}.png, audio.wav   RetroArch's defaults
 #   OUT_DIR/bases/<CORE>/assets/bottom_menu.png         touch screen menu
+#   OUT_DIR/bases/<CORE>/core_options.h  the core's option definitions
 # and records the revision in OUT_DIR/VERSIONS. Sources are checked out in
 # build/base/ (WORK_DIR overrides it). With DEVKITARM set (inside
 # devkitpro/devkitarm) it builds directly; otherwise it runs itself in that
@@ -119,6 +120,7 @@ ra_make_var() {
 build_core() {
     local work="$1" recipe="$2" out_dir="$3" ra_dir="$1/RetroArch"
     local CORE_NAME CORE_REPO CORE_REF CORE_SUBDIR CORE_MAKEFILE CORE_LIB CORE_CFLAGS=""
+    local CORE_OPTIONS=""
     # shellcheck source=retroarch/cores/gambatte.env
     source "${recipe}"
     local core_dir="${work}/cores/${CORE_NAME}" dest="${out_dir}/bases/${CORE_NAME}"
@@ -142,6 +144,12 @@ build_core() {
     install -m 0644 "${ra_dir}/$(ra_make_var "${ra_dir}" "${CORE_NAME}" APP_AUDIO)" "${dest}/audio.wav"
     install -D -m 0644 "${work}/retroarch-assets/ctr/bottom_menu.png" \
         "${dest}/assets/bottom_menu.png"
+    # The GUI reads the option definitions (keys, values, defaults) from it.
+    if [[ -n "${CORE_OPTIONS}" ]]; then
+        install -m 0644 "${core_dir}/${CORE_OPTIONS}" "${dest}/core_options.h"
+    else
+        rm -f "${dest}/core_options.h"
+    fi
     {
         echo "CORE_NAME=${CORE_NAME}"
         echo "CORE_REF=${CORE_REF}"
