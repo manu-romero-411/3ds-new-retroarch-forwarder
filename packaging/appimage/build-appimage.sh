@@ -23,6 +23,9 @@ source "${HERE}/../common.sh"
 source "${HERE}/../pyside6-prune.sh"
 
 readonly PYTHON_VERSION="${PYTHON_VERSION:-3.12}"
+# The newest PySide6 that runs on the build system's glibc (2.35): on x86_64
+# that is this version; on aarch64 the newer wheels need glibc 2.39, so pip
+# settles for an older one (6.8), which keeps Raspberry Pi OS and the like.
 readonly PYSIDE_VERSION="${PYSIDE_VERSION:-6.12.0}"
 readonly APPIMAGETOOL_URL="https://github.com/AppImage/appimagetool/releases/download/continuous"
 readonly BASES_ARCHIVE="retroarch-bases.tar.gz"
@@ -55,9 +58,9 @@ install_python() {
     # uv marks its Pythons as externally managed (PEP 668); this copy is ours.
     find "${appdir}/usr/python/lib" -maxdepth 2 -name EXTERNALLY-MANAGED -delete
 
-    log_info "Installing the program and PySide6-Essentials ${PYSIDE_VERSION}"
+    log_info "Installing the program and PySide6-Essentials (at most ${PYSIDE_VERSION})"
     "${appdir}/usr/python/bin/python3" -m pip install --quiet --no-compile --no-warn-script-location \
-        "${REPO_ROOT}" "PySide6-Essentials==${PYSIDE_VERSION}"
+        "${REPO_ROOT}" "PySide6-Essentials>=6.6,<=${PYSIDE_VERSION}"
     local site
     site="$("${appdir}/usr/python/bin/python3" -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')"
     printf '__version__ = "%s"\n' "$(package_version)" > "${site}/${MODULE}/_version.py"
