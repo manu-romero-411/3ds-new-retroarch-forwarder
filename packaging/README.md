@@ -60,9 +60,11 @@ through `pw-play`, `paplay` or `aplay`, as with the bundled PySide6 of the
 Windows after `toolchain/build-tools.sh --static` has built `makerom.exe`
 and `bannertool.exe` in an MSYS2 MINGW64 shell. It freezes the program with
 PyInstaller ([`windows/forwarder3ds.spec`](windows/forwarder3ds.spec)) into
-a folder holding `3DS Forwarder.exe` (the GUI, no console window),
-`3ds-forwarder.exe` (the command line tool) and `toolchain/` (the two
-programs and the RetroArch bases, found beside the executable), and zips it.
+a folder holding `3DS Forwarder.exe` (the GUI, no console window; with no
+console its log goes to `%LOCALAPPDATA%\3ds-forwarder\3ds-forwarder.log`),
+`toolchain/` (the two programs and the RetroArch bases) and
+`cli/3ds-forwarder.exe` (the command line tool, built without Qt), and zips
+it.
 Settings and data go to `%APPDATA%\3ds-forwarder`, the cache to
 `%LOCALAPPDATA%\3ds-forwarder`. Fonts are looked up in the Windows font
 folders (there is no fontconfig).

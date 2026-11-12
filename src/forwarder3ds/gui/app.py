@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import os
 import sys
 
-from PySide6.QtCore import QByteArray, QLibraryInfo, QLocale, Qt, QTranslator
+from PySide6.QtCore import QByteArray, QLibraryInfo, QLocale, Qt, QTimer, QTranslator
 from PySide6.QtGui import QIcon, QPainter, QPixmap
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import QApplication
@@ -16,6 +17,9 @@ from forwarder3ds.gui.main_window import APP_TITLE, MainWindow
 
 APP_ID = "io.github.manu_romero_411.forwarder3ds"
 ICON_SIZES = (16, 32, 48, 64, 128, 256)
+
+#: Set to anything: open the main window and quit at once (packaging checks).
+SMOKE_TEST_ENV = "FORWARDER3DS_SMOKE_TEST"
 
 
 def _install_qt_translations(app: QApplication) -> None:
@@ -55,6 +59,8 @@ def main() -> int:
     _install_qt_translations(app)
     window = MainWindow()
     window.show()
+    if os.environ.get(SMOKE_TEST_ENV):  # packaging checks: open the window, then quit
+        QTimer.singleShot(0, app.quit)
     return app.exec()
 
 

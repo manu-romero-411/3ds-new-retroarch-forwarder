@@ -99,7 +99,8 @@ def toolchain_dirs() -> list[Path]:
     """Candidate toolchain directories, most specific first.
 
     1. ``$FORWARDER3DS_TOOLCHAIN`` (the AppImage sets it);
-    2. ``toolchain`` beside the program, for the Windows build (PyInstaller);
+    2. ``toolchain`` beside the program, or beside its folder (the command
+       line tool in ``cli/``), for the Windows build (PyInstaller);
     3. ``<prefix>/toolchain`` where the package sits in ``<prefix>/lib`` (the
        .deb/.rpm layout) or ``<prefix>/src`` (a git checkout);
     4. ``<venv>/../toolchain`` (``install.sh`` puts the venv next to it);
@@ -112,7 +113,9 @@ def toolchain_dirs() -> list[Path]:
     if override:
         candidates.append(Path(override).expanduser())
     if getattr(sys, "frozen", False):  # a PyInstaller build: the toolchain sits beside it
-        candidates.append(Path(sys.executable).resolve().parent / TOOLCHAIN_DIR_NAME)
+        program_dir = Path(sys.executable).resolve().parent
+        candidates.append(program_dir / TOOLCHAIN_DIR_NAME)
+        candidates.append(program_dir.parent / TOOLCHAIN_DIR_NAME)  # cli/ of the Windows build
     candidates.append(_PACKAGE_DIR.parent.parent / TOOLCHAIN_DIR_NAME)
     candidates.append(Path(sys.prefix).parent / TOOLCHAIN_DIR_NAME)
     candidates.append(data_dir() / TOOLCHAIN_DIR_NAME)

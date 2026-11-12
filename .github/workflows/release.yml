@@ -222,8 +222,12 @@ jobs:
       - name: It starts
         shell: bash
         run: |
-          "build/windows-dist/3DS Forwarder/3ds-forwarder.exe" --version
-          "build/windows-dist/3DS Forwarder/3ds-forwarder.exe" doctor --offline
+          "build/windows-dist/3DS Forwarder/cli/3ds-forwarder.exe" --version
+          "build/windows-dist/3DS Forwarder/cli/3ds-forwarder.exe" doctor --offline
+          # The GUI has no console: open its window, quit, and show its log.
+          FORWARDER3DS_SMOKE_TEST=1 QT_QPA_PLATFORM=offscreen \
+            timeout 180 "build/windows-dist/3DS Forwarder/3DS Forwarder.exe"
+          cat "${LOCALAPPDATA}/3ds-forwarder/3ds-forwarder.log"
 
       - uses: actions/upload-artifact@v7
         with:

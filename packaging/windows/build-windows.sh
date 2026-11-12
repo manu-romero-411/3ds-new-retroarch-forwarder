@@ -12,8 +12,8 @@
 # The RetroArch bases come from BASES_DIR (default:
 # dist-bases/retroarch-bases.tar.gz): they are console binaries, the same
 # for every system. The result, dist/3DS_Forwarder-<version>-windows-x64.zip,
-# unzips to a folder with "3DS Forwarder.exe" (the GUI), 3ds-forwarder.exe
-# (the command line tool) and toolchain/. PACKAGE_VERSION (the tag without
+# unzips to a folder with "3DS Forwarder.exe" (the GUI), toolchain/ and
+# cli/3ds-forwarder.exe (the command line tool). PACKAGE_VERSION (the tag without
 # "v") is the version.
 set -euo pipefail
 
@@ -48,6 +48,8 @@ main() {
         --distpath "${BUILD_DIR}/windows-dist" --workpath "${BUILD_DIR}/windows-work" \
         "${HERE}/forwarder3ds.spec"
     folder="${BUILD_DIR}/windows-dist/3DS Forwarder"
+    rm -rf "${folder}/cli"
+    mv "${BUILD_DIR}/windows-dist/3ds-forwarder-cli" "${folder}/cli"
 
     mkdir -p "${folder}/toolchain"
     cp -r "${tools}/." "${folder}/toolchain/"

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import sys
+from pathlib import Path
 
 SUCCESS = 25
 logging.addLevelName(SUCCESS, "SUCCESS")
@@ -49,16 +50,34 @@ class TagFormatter(logging.Formatter):
         return f"{tag} {stamp} {message}"
 
 
+def log_file() -> Path:
+    """Where a program without a console logs (one file per session)."""
+    from forwarder3ds.core import paths  # pylint: disable=import-outside-toplevel
+
+    directory = paths.cache_dir()
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory / "3ds-forwarder.log"
+
+
 def setup_console_logging(verbose: bool = False) -> None:
-    """Attach a stderr handler to the package logger (idempotent)."""
+    """Attach a stderr handler to the package logger (idempotent).
+
+    Without a stderr (a windowed program, such as the Windows build) the log
+    goes to :func:`log_file`.
+    """
     logger = get_logger()
     logger.setLevel(logging.DEBUG if verbose else logging.INFO)
     for handler in logger.handlers:
         if getattr(handler, "_forwarder3ds_console", False):
             handler.setLevel(logger.level)
             return
-    handler = logging.StreamHandler(sys.stderr)
-    handler.setFormatter(TagFormatter(colour=sys.stderr.isatty()))
+    handler: logging.Handler
+    if sys.stderr is not None:
+        handler = logging.StreamHandler(sys.stderr)
+        handler.setFormatter(TagFormatter(colour=sys.stderr.isatty()))
+    else:  # no console (the Windows GUI build): log to a file instead
+        handler = logging.FileHandler(log_file(), mode="w", encoding="utf-8")
+        handler.setFormatter(TagFormatter(colour=False))
     handler.setLevel(logger.level)
     setattr(handler, "_forwarder3ds_console", True)
     logger.addHandler(handler)
