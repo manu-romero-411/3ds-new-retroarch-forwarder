@@ -381,11 +381,9 @@ def bios_files(directory: Path) -> list[Path]:
     """The files under ``directory`` (hidden ones left out), relative to it."""
     if not directory.is_dir():
         return []
-    return sorted(
-        path.relative_to(directory)
-        for path in directory.rglob("*")
-        if path.is_file() and not any(part.startswith(".") for part in path.parts)
-    )
+    found = (path.relative_to(directory) for path in directory.rglob("*") if path.is_file())
+    # Only the parts below ``directory``: it lives in ~/.local, itself hidden.
+    return sorted(name for name in found if not any(p.startswith(".") for p in name.parts))
 
 
 def _write_bios(romfs: Path, directory: Path, base: Base) -> None:
