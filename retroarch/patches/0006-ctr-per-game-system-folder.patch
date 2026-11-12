@@ -1,0 +1,285 @@
+ctr: a system folder per game, over the BIOS the CIA carries
+
+The system folder is the manifest's system_dir, the game's own
+<data_dir>/system on the SD card. When the CIA carries BIOS files
+(romfs:/bios, packed by the injector from the user's bios/<core>/ folder)
+RetroArch and the core see that folder through "sys:/", a small device
+that lays the SD card folder over the CIA's: a file is read from the SD
+card when it is there (a BIOS added or replaced later, without
+reinstalling) and from the CIA otherwise; whatever a core writes (MAME's
+settings, nvram, hiscores) goes to the SD card. Nothing is copied.
+
+The folder is exported as LIBRETRO_SYSTEM_DIRECTORY, which RetroArch
+applies after the config file: it wins over a system folder saved in the
+game's retroarch.cfg by an older build of the CIA.
+
+Applies on top of 0005, to RetroArch v1.22.2 (RETROARCH_REF in versions.env).
+
+--- a/frontend/drivers/platform_ctr.c
++++ b/frontend/drivers/platform_ctr.c
+@@ -21,7 +21,11 @@
+ #include <ctype.h>
+ #include <boolean.h>
+ #include <sys/stat.h>
++#include <sys/iosupport.h>
+ #include <dirent.h>
++#include <errno.h>
++#include <fcntl.h>
++#include <unistd.h>
+ 
+ #include <3ds.h>
+ #include <3ds/svc.h>
+@@ -165,6 +169,228 @@
+    }
+ }
+ 
++/* "sys:/", the game's system folder as RetroArch and the core see it: the
++ * game's own folder on the SD card (<data_dir>/system) laid over the BIOS
++ * the CIA carries (romfs:/bios). Nothing is copied: a file is read from the
++ * SD card when it is there (a BIOS added or replaced later, without
++ * reinstalling), else from the CIA; whatever a core writes (MAME's settings,
++ * nvram, hiscores) goes to the SD card. */
++#define CTR_SYS_DEVICE "sys"
++#define CTR_SYS_ROOT   CTR_SYS_DEVICE ":/"
++#ifndef NAME_MAX
++#define NAME_MAX 255
++#endif
++
++static char ctr_sys_sd[PATH_MAX_LENGTH];
++static char ctr_sys_rom[PATH_MAX_LENGTH];
++
++typedef struct
++{
++   int fd;
++} ctr_sys_file_t;
++
++typedef struct
++{
++   DIR *sd;
++   DIR *rom;
++   char sd_dir[PATH_MAX_LENGTH];
++   char rom_dir[PATH_MAX_LENGTH];
++} ctr_sys_dir_t;
++
++/* "sys:/a/b" -> "<base>/a/b" */
++static void ctr_sys_path(char *s, size_t len, const char *base,
++      const char *path)
++{
++   const char *rel = strchr(path, ':');
++   rel = rel ? rel + 1 : path;
++   while (*rel == '/')
++      rel++;
++   if (*rel)
++      fill_pathname_join(s, base, rel, len);
++   else
++      strlcpy(s, base, len);
++}
++
++static int ctr_sys_fail(struct _reent *r)
++{
++   r->_errno = errno;
++   return -1;
++}
++
++static int ctr_sys_open(struct _reent *r, void *file, const char *path,
++      int flags, int mode)
++{
++   char real[PATH_MAX_LENGTH];
++   struct stat st;
++   int fd;
++   bool writing = (flags & O_ACCMODE) != O_RDONLY
++         || (flags & (O_CREAT | O_TRUNC | O_APPEND));
++
++   ctr_sys_path(real, sizeof(real), ctr_sys_sd, path);
++   if (!writing && stat(real, &st) != 0)
++      ctr_sys_path(real, sizeof(real), ctr_sys_rom, path);
++   if ((fd = open(real, flags, mode)) < 0)
++      return ctr_sys_fail(r);
++   ((ctr_sys_file_t*)file)->fd = fd;
++   return 0;
++}
++
++static int ctr_sys_close(struct _reent *r, void *file)
++{
++   return close(((ctr_sys_file_t*)file)->fd) ? ctr_sys_fail(r) : 0;
++}
++
++static ssize_t ctr_sys_read(struct _reent *r, void *file, char *ptr,
++      size_t len)
++{
++   ssize_t done = read(((ctr_sys_file_t*)file)->fd, ptr, len);
++   return done < 0 ? ctr_sys_fail(r) : done;
++}
++
++static ssize_t ctr_sys_write(struct _reent *r, void *file, const char *ptr,
++      size_t len)
++{
++   ssize_t done = write(((ctr_sys_file_t*)file)->fd, ptr, len);
++   return done < 0 ? ctr_sys_fail(r) : done;
++}
++
++static off_t ctr_sys_seek(struct _reent *r, void *file, off_t pos, int dir)
++{
++   off_t at = lseek(((ctr_sys_file_t*)file)->fd, pos, dir);
++   return at < 0 ? ctr_sys_fail(r) : at;
++}
++
++static int ctr_sys_fstat(struct _reent *r, void *file, struct stat *st)
++{
++   return fstat(((ctr_sys_file_t*)file)->fd, st) ? ctr_sys_fail(r) : 0;
++}
++
++static int ctr_sys_stat(struct _reent *r, const char *path, struct stat *st)
++{
++   char real[PATH_MAX_LENGTH];
++   ctr_sys_path(real, sizeof(real), ctr_sys_sd, path);
++   if (!stat(real, st))
++      return 0;
++   ctr_sys_path(real, sizeof(real), ctr_sys_rom, path);
++   return stat(real, st) ? ctr_sys_fail(r) : 0;
++}
++
++static int ctr_sys_mkdir(struct _reent *r, const char *path, int mode)
++{
++   char real[PATH_MAX_LENGTH];
++   ctr_sys_path(real, sizeof(real), ctr_sys_sd, path);
++   return mkdir(real, mode) ? ctr_sys_fail(r) : 0;
++}
++
++static int ctr_sys_unlink(struct _reent *r, const char *path)
++{
++   char real[PATH_MAX_LENGTH];
++   ctr_sys_path(real, sizeof(real), ctr_sys_sd, path);
++   return unlink(real) ? ctr_sys_fail(r) : 0;
++}
++
++static int ctr_sys_rename(struct _reent *r, const char *from, const char *to)
++{
++   char real_from[PATH_MAX_LENGTH];
++   char real_to[PATH_MAX_LENGTH];
++   ctr_sys_path(real_from, sizeof(real_from), ctr_sys_sd, from);
++   ctr_sys_path(real_to, sizeof(real_to), ctr_sys_sd, to);
++   return rename(real_from, real_to) ? ctr_sys_fail(r) : 0;
++}
++
++static DIR_ITER *ctr_sys_diropen(struct _reent *r, DIR_ITER *state,
++      const char *path)
++{
++   ctr_sys_dir_t *dir = (ctr_sys_dir_t*)state->dirStruct;
++   ctr_sys_path(dir->sd_dir, sizeof(dir->sd_dir), ctr_sys_sd, path);
++   ctr_sys_path(dir->rom_dir, sizeof(dir->rom_dir), ctr_sys_rom, path);
++   dir->sd  = opendir(dir->sd_dir);
++   dir->rom = opendir(dir->rom_dir);
++   if (!dir->sd && !dir->rom)
++   {
++      r->_errno = ENOENT;
++      return NULL;
++   }
++   return state;
++}
++
++static int ctr_sys_dirreset(struct _reent *r, DIR_ITER *state)
++{
++   ctr_sys_dir_t *dir = (ctr_sys_dir_t*)state->dirStruct;
++   (void)r;
++   if (dir->sd)
++      rewinddir(dir->sd);
++   if (dir->rom)
++      rewinddir(dir->rom);
++   return 0;
++}
++
++/* The SD card's entries, then the CIA's that the SD card does not have. */
++static int ctr_sys_dirnext(struct _reent *r, DIR_ITER *state, char *name,
++      struct stat *st)
++{
++   char real[PATH_MAX_LENGTH];
++   ctr_sys_dir_t *dir    = (ctr_sys_dir_t*)state->dirStruct;
++   struct dirent *entry  = NULL;
++
++   if (dir->sd && (entry = readdir(dir->sd)))
++   {
++      fill_pathname_join(real, dir->sd_dir, entry->d_name, sizeof(real));
++      strlcpy(name, entry->d_name, NAME_MAX + 1);
++      return stat(real, st) ? ctr_sys_fail(r) : 0;
++   }
++   while (dir->rom && (entry = readdir(dir->rom)))
++   {
++      fill_pathname_join(real, dir->sd_dir, entry->d_name, sizeof(real));
++      if (dir->sd && path_is_valid(real))
++         continue;
++      fill_pathname_join(real, dir->rom_dir, entry->d_name, sizeof(real));
++      strlcpy(name, entry->d_name, NAME_MAX + 1);
++      return stat(real, st) ? ctr_sys_fail(r) : 0;
++   }
++   r->_errno = ENOENT;
++   return -1;
++}
++
++static int ctr_sys_dirclose(struct _reent *r, DIR_ITER *state)
++{
++   ctr_sys_dir_t *dir = (ctr_sys_dir_t*)state->dirStruct;
++   (void)r;
++   if (dir->sd)
++      closedir(dir->sd);
++   if (dir->rom)
++      closedir(dir->rom);
++   return 0;
++}
++
++static const devoptab_t ctr_sys_devoptab = {
++   .name         = CTR_SYS_DEVICE,
++   .structSize   = sizeof(ctr_sys_file_t),
++   .open_r       = ctr_sys_open,
++   .close_r      = ctr_sys_close,
++   .write_r      = ctr_sys_write,
++   .read_r       = ctr_sys_read,
++   .seek_r       = ctr_sys_seek,
++   .fstat_r      = ctr_sys_fstat,
++   .stat_r       = ctr_sys_stat,
++   .unlink_r     = ctr_sys_unlink,
++   .rename_r     = ctr_sys_rename,
++   .mkdir_r      = ctr_sys_mkdir,
++   .dirStateSize = sizeof(ctr_sys_dir_t),
++   .diropen_r    = ctr_sys_diropen,
++   .dirreset_r   = ctr_sys_dirreset,
++   .dirnext_r    = ctr_sys_dirnext,
++   .dirclose_r   = ctr_sys_dirclose,
++};
++
++/* Lays sd_dir over rom_dir as "sys:/"; false if the device cannot be added. */
++static bool ctr_sys_mount(const char *sd_dir, const char *rom_dir)
++{
++   strlcpy(ctr_sys_sd, sd_dir, sizeof(ctr_sys_sd));
++   strlcpy(ctr_sys_rom, rom_dir, sizeof(ctr_sys_rom));
++   return AddDevice(&ctr_sys_devoptab) >= 0;
++}
++
+ /* RetroArch looks a game's remap up in <remap dir>/<core name>/<content
+  * name>.rmp; the core is linked in, so its name is known before it loads. */
+ static void ctr_injected_seed_remap(const char *data_dir)
+@@ -220,13 +446,18 @@
+    ctr_injected_set_dir(DEFAULT_DIR_PLAYLIST,    data_dir);
+    ctr_injected_set_dir(DEFAULT_DIR_LOGS,        data_dir);
+    ctr_injected_set_dir(DEFAULT_DIR_CACHE,       data_dir);
++   /* The game's own system folder (<data_dir>/system), laid over the BIOS
++    * the CIA carries when there are any ("sys:/", see ctr_sys_mount). It
++    * wins over a folder saved in the game's retroarch.cfg by an older build:
++    * RetroArch applies LIBRETRO_SYSTEM_DIRECTORY after the config file. */
+    if (string_is_empty(system_dir))
+-      ctr_injected_set_dir(DEFAULT_DIR_SYSTEM,   data_dir);
+-   else
+-   {
+-      path_mkdir(system_dir);
+-      ctr_injected_set_dir(DEFAULT_DIR_SYSTEM,   system_dir);
+-   }
++      strlcpy(system_dir, data_dir, sizeof(system_dir));
++   path_mkdir(system_dir);
++   if (     path_is_directory(CTR_INJECTED_ROOT "bios")
++         && ctr_sys_mount(system_dir, CTR_INJECTED_ROOT "bios"))
++      strlcpy(system_dir, CTR_SYS_ROOT, sizeof(system_dir));
++   ctr_injected_set_dir(DEFAULT_DIR_SYSTEM,      system_dir);
++   setenv("LIBRETRO_SYSTEM_DIRECTORY", system_dir, 1);
+ 
+    /* Startup parses every .info file (or their cache) in the core info
+     * folder; a single static core needs none of them. */

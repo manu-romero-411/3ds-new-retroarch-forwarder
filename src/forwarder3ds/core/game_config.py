@@ -66,7 +66,8 @@ class ScreenSettings:
     width: int = SCREEN_WIDTH
     height: int = SCREEN_HEIGHT
     #: Bilinear filtering.
-    smooth: bool = False
+    #: Bilinear filtering (on by default; pixel perfect is unaffected).
+    smooth: bool = True
 
     def config_lines(self) -> dict[str, str]:
         """The ``retroarch.cfg`` entries for these settings."""
@@ -136,7 +137,7 @@ class ScreenSettings:
             mode=mode,
             width=_int(data.get("width"), SCREEN_WIDTH),
             height=_int(data.get("height"), SCREEN_HEIGHT),
-            smooth=bool(data.get("smooth", False)),
+            smooth=bool(data.get("smooth", True)),
         )
 
 

@@ -107,7 +107,7 @@ def test_core_options_v1() -> None:
             ScreenSettings(ScreenMode.CUSTOM, 360, 240),
             {"aspect_ratio_index": "23", "custom_viewport_x": "20", "custom_viewport_y": "0"},
         ),
-        (ScreenSettings(), {"aspect_ratio_index": "22", "video_smooth": "false"}),
+        (ScreenSettings(), {"aspect_ratio_index": "22", "video_smooth": "true"}),
     ],
 )
 def test_screen_settings(screen: ScreenSettings, expected: dict[str, str]) -> None:
@@ -299,3 +299,26 @@ def test_standalone_core_validates() -> None:
         CoreRegistry.load(DEFAULT_CORES_JSON),
         SystemCatalog.load(),
     )
+
+
+def test_bios_packed_from_the_user_folder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    bios = tmp_path / "data" / "3ds-forwarder" / "bios" / "fbneo_neogeo"
+    (bios / "fbneo").mkdir(parents=True)
+    (bios / "fbneo" / "neogeo.zip").write_bytes(b"PK")
+    (bios / ".DS_Store").write_bytes(b"junk")
+    base_dir = tmp_path / "base"
+    base_dir.mkdir()
+    (base_dir / "retroarch.elf").write_bytes(b"\x7fELF")
+    (base_dir / "base.env").write_text("CORE_NAME=fbneo_neogeo\n", encoding="utf-8")
+    rom = tmp_path / "mslug.zip"
+    rom.write_bytes(b"PK")
+    request = make_request(
+        rom=rom, console="fbneo", long_name="Metal Slug", output=tmp_path / "o.cia"
+    )
+    romfs = write_romfs(tmp_path / "scratch", request, Base.load(base_dir))
+    assert (romfs / "bios" / "fbneo" / "neogeo.zip").read_bytes() == b"PK"
+    assert not (romfs / "bios" / ".DS_Store").exists()
+    # the game's own system folder, where RetroArch copies them on boot
+    manifest = (romfs / "manifest.cfg").read_text(encoding="utf-8")
+    assert 'system_dir = "sdmc:/saves/fbneo/Metal Slug/system"' in manifest

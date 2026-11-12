@@ -19,9 +19,19 @@ RetroArch installed and never touches `sdmc:/retroarch`.
   ├── game.state*         save states (+ thumbnails)
   ├── game.opt            core options
   ├── <core name>/game.rmp  button mapping (RetroArch remap)
-  └── bezel.png           optional: replaces the CIA's bezel (bezel.cfg appears next to it)
-  sdmc:/emu_bios/         BIOS files shared by every game
+  ├── bezel.png           optional: replaces the CIA's bezel (bezel.cfg appears next to it)
+  └── system/             RetroArch's system folder for this game: BIOS, and
+                          what cores keep there (MAME's settings and hiscores)
   ```
+
+  BIOS files travel inside each CIA: put them in
+  `~/.local/share/3ds-forwarder/bios/<core>/` (`%APPDATA%\3ds-forwarder\bios\<core>\`
+  on Windows), where `<core>` is the base's name (`pcsx_rearmed`,
+  `fbneo_neogeo`...), laid out as in a system folder (`fbneo/neogeo.zip`).
+  Every CIA of that core packs them, and RetroArch reads them from the CIA
+  as if they were in the game's `system/` folder; nothing is copied. A file
+  in that folder wins, so a BIOS left out of the CIA can be dropped there
+  later, without reinstalling.
 
   `<console>` is Batocera's folder name (`gb`, `snes`, `megadrive`, `psx`...).
 - **Consoles**: Atari 2600, 7800 and Lynx, NES and Famicom Disk System,

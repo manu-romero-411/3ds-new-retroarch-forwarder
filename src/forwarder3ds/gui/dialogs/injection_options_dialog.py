@@ -24,8 +24,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from PIL import Image
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QPalette, QPixmap
+from PySide6.QtCore import Qt, QUrl
+from PySide6.QtGui import QDesktopServices, QPalette, QPixmap
 from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
@@ -64,8 +64,10 @@ from forwarder3ds.artwork.screen_preview import (
     render_top_preview,
     to_png,
 )
+from forwarder3ds.builder.injector import bios_files
 from forwarder3ds.core.core_options import CoreOptions
 from forwarder3ds.core.game_config import SCREEN_HEIGHT, SCREEN_WIDTH, ScreenMode, ScreenSettings
+from forwarder3ds.core.paths import bios_dir
 from forwarder3ds.gui.dialogs.button_map_dialog import ButtonMapDialog
 from forwarder3ds.gui.dialogs.core_options_dialog import CoreOptionsDialog
 from forwarder3ds.gui.widgets.path_picker import PathPicker
@@ -329,8 +331,35 @@ class InjectionOptionsDialog(QDialog):  # pylint: disable=too-many-instance-attr
                 )
             )
         form.addRow(core, self._options_label)
+        form.addRow(self._bios_row())
         group.setEnabled(not self._game.standalone)
         return group
+
+    def _bios_row(self) -> QWidget:
+        """How many BIOS files the core's folder holds, and a button to open it."""
+        directory = bios_dir(self._game.core)
+        count = len(bios_files(directory))
+        label = QLabel(
+            self.tr("BIOS: {n} file(s) packed with the game").format(n=count)
+            if count
+            else self.tr("BIOS: none packed")
+        )
+        label.setToolTip(str(directory))
+        open_folder = QPushButton(self.tr("Open BIOS folder"))
+        open_folder.setToolTip(
+            self.tr(
+                "Files in {folder} go into every {core} CIA, which reads them as part of "
+                "the game's system folder (sdmc:/saves/<console>/<game>/system); a file "
+                "there wins. Keep the layout of RetroArch's system folder."
+            ).format(folder=directory, core=self._game.core)
+        )
+        open_folder.clicked.connect(lambda: _open_folder(directory))
+        row = QWidget()
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(label, 1)
+        layout.addWidget(open_folder)
+        return row
 
     # ── Previews ─────────────────────────────────────────────────────────
 
@@ -459,6 +488,11 @@ class InjectionOptionsDialog(QDialog):  # pylint: disable=too-many-instance-attr
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return None
         return dialog.options()
+
+
+def _open_folder(directory: Path) -> None:
+    directory.mkdir(parents=True, exist_ok=True)
+    QDesktopServices.openUrl(QUrl.fromLocalFile(str(directory)))
 
 
 def _pixmap(png: bytes) -> QPixmap:

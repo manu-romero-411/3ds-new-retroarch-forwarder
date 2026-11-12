@@ -48,6 +48,13 @@ Written against the RetroArch release in `RETROARCH_REF`; bump both together.
 - `0005-ctr-black-touch-screen-in-menu.patch`: without `bottom_menu.png`
   (injected titles ship none), the touch screen stays black while the menu
   is open, instead of RetroArch's touch screen menu (resume, save/load state).
+- `0006-ctr-per-game-system-folder.patch`: the system folder is the game's
+  own `<data_dir>/system` (writable, so MAME keeps its settings) and wins
+  over a folder saved in the game's `retroarch.cfg`. When the CIA carries
+  BIOS (`romfs:/bios/`), RetroArch sees that folder through `sys:/`, a small
+  device laying the SD card folder over the CIA's: files are read from the
+  SD card when they are there, else from the CIA, and written to the SD
+  card. Nothing is copied.
 
 ## Core recipes
 
@@ -72,9 +79,12 @@ with its core option definitions (see `gambatte.env` for the format). Which cons
 | mednafen_pce_fast | pcengine, pcenginecd | PC Engine CD needs `syscard3.pce` |
 | pcsx_rearmed | psx | one-disc `.chd` or `.pbp`; a BIOS (`scph5501.bin`...) is recommended |
 | mame2003, mame2000 | mame | 0.78 / 0.37b5 romsets; use non-merged sets |
-| fbneo_neogeo, fbneo_cps12 | fbneo | FinalBurn Neo's Neo Geo and CPS-1/2 subsets (the whole FBNeo does not fit); `neogeo.zip` in `sdmc:/emu_bios/fbneo/` |
+| fbneo_neogeo, fbneo_cps12 | fbneo | FinalBurn Neo's Neo Geo and CPS-1/2 subsets (the whole FBNeo does not fit); `neogeo.zip` in `bios/fbneo_neogeo/fbneo/` |
 | fbalpha2012 (+ _cps1, _cps2, _cps3, _neogeo) | fbneo (alternatives) | 0.2.97.29 romsets |
 
-BIOS files go in `sdmc:/emu_bios/` (RetroArch's system folder for every
-game). The MAME and FB Alpha 2012 bases need RetroArch's "big text section":
+Each game has its own system folder, `sdmc:/saves/<console>/<game>/system/`
+(patch 0006), seen together with the BIOS packed in the CIA (from
+`~/.local/share/3ds-forwarder/bios/<core>/`): a BIOS missing from the CIA
+can be added to the SD card folder by hand. The MAME and FB Alpha 2012 bases
+need RetroArch's "big text section":
 they take kernel access (svchax) at boot, which Luma3DS allows.

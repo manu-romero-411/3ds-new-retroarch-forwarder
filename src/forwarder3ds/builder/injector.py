@@ -16,7 +16,10 @@ linked with one core and patched for single-game mode, see
 
 On the console the game keeps everything in one flat folder,
 ``sdmc:/saves/<console>/<game>/``: ``retroarch.cfg``, ``game.srm``,
-``game.state*``, ``game.opt``... BIOS files go in ``sdmc:/emu_bios/``.
+``game.state*``, ``game.opt``... Its ``system/`` sub-folder is RetroArch's
+system folder for that game, seen together with the BIOS packed in the CIA
+(read from the SD card when there, else from the CIA): a missing one can be
+added there by hand.
 An arcade romset keeps its own name instead of ``game`` (``sf2.zip``, so
 ``sf2.srm``...): the emulator recognizes the game by it.
 A ``bezel.png`` dropped in that folder replaces the CIA's own bezel.
@@ -55,6 +58,7 @@ from forwarder3ds.core.cores import DEFAULT_CORES_JSON, CoreCatalogError, CoreRe
 from forwarder3ds.core.game_config import ScreenSettings, remap_text
 from forwarder3ds.core.logs import get_logger, log_success
 from forwarder3ds.core.names import save_folder_name
+from forwarder3ds.core.paths import bios_dir as user_bios_dir
 from forwarder3ds.core.paths import bundled
 from forwarder3ds.core.projects import Asset, Project
 from forwarder3ds.core.settings import DEFAULT_MANUFACTURER
@@ -79,13 +83,16 @@ SMDH_FLAGS_UNRECORDED = "visible"
 #: Root of every game's data folder on the SD card.
 SAVES_ROOT = "sdmc:/saves"
 #: Shared BIOS folder (RetroArch's "system" directory) of every game.
-BIOS_DIR = "sdmc:/emu_bios"
+#: The game's system folder, inside its data folder (BIOS, MAME's settings).
+SYSTEM_DIR_NAME = "system"
 #: Base name of the ROM inside the RomFS, hence of its saves (game.srm...).
 CONTENT_STEM = "game"
 MANIFEST_FILE = "manifest.cfg"
 SEED_CONFIG_FILE = "retroarch.cfg"
 #: The menu's colour theme, referenced by the seed config.
 MENU_THEME_FILE = "rgui_theme.cfg"
+#: RomFS folder of the core's BIOS files, seen through the game's system folder.
+BIOS_DIR_NAME = "bios"
 #: Drawn by RetroArch on the touch screen while the game runs (patch 0004).
 BOTTOM_IDLE_FILE = "bottom_idle.png"
 BEZEL_FILE = "bezel.png"
@@ -128,6 +135,8 @@ class GameRequest:  # pylint: disable=too-many-instance-attributes
     rom_name: str = ""
     #: An arcade romset: packed as it is, under its own name.
     arcade: bool = False
+    #: BIOS files to pack (``None``: the user's ``bios/<core>`` folder).
+    bios_dir: Path | None = None
     #: Screen scaling and filtering (``None``: RetroArch's defaults).
     screen: ScreenSettings | None = None
     #: Initial core options (key -> value), written as ``game.opt``.
@@ -151,6 +160,11 @@ class GameRequest:  # pylint: disable=too-many-instance-attributes
     def data_dir(self) -> str:
         """The game's folder on the SD card, e.g. ``sdmc:/saves/snes/Super Mario World``."""
         return f"{SAVES_ROOT}/{self.console}/{self.folder}"
+
+    @property
+    def system_dir(self) -> str:
+        """RetroArch's system folder for this game: BIOS and what cores keep there."""
+        return f"{self.data_dir}/{SYSTEM_DIR_NAME}"
 
     @property
     def content_name(self) -> str:
@@ -303,7 +317,7 @@ def manifest_text(request: GameRequest) -> str:
     entries = {
         "content": request.content_name,
         "data_dir": request.data_dir,
-        "system_dir": BIOS_DIR,
+        "system_dir": request.system_dir,
         "core": request.core,
         "console": request.console,
         "game": request.folder,
@@ -343,6 +357,7 @@ def write_romfs(directory: Path, request: GameRequest, base: Base) -> Path:
             shutil.copyfile(request.rom, romfs / request.content_name)
     except (OSError, ArchiveError, SystemCatalogError) as exc:
         raise BuildError(f"Cannot read {request.rom}: {exc}") from exc
+    _write_bios(romfs, request.bios_dir or user_bios_dir(base.core), base)
     (romfs / MANIFEST_FILE).write_text(manifest_text(request), encoding="utf-8")
     if base.standalone:
         _write_standalone_pictures(romfs, request, base)
@@ -360,6 +375,37 @@ def write_romfs(directory: Path, request: GameRequest, base: Base) -> Path:
         )
     (romfs / REMAP_FILE).write_text(remap_text(request.remap, request.console), encoding="utf-8")
     return romfs
+
+
+def bios_files(directory: Path) -> list[Path]:
+    """The files under ``directory`` (hidden ones left out), relative to it."""
+    if not directory.is_dir():
+        return []
+    return sorted(
+        path.relative_to(directory)
+        for path in directory.rglob("*")
+        if path.is_file() and not any(part.startswith(".") for part in path.parts)
+    )
+
+
+def _write_bios(romfs: Path, directory: Path, base: Base) -> None:
+    """Pack the core's BIOS files in ``romfs:/bios``.
+
+    RetroArch reads them as if they were in the game's system folder
+    (``<data_dir>/system``, patch 0006), unless that folder has its own copy.
+    Standalone emulators take none.
+    """
+    files = bios_files(directory)
+    if not files:
+        return
+    if base.standalone:
+        _log.warning("%s is not RetroArch: its BIOS folder is not packed", base.core)
+        return
+    for name in files:
+        target = romfs / BIOS_DIR_NAME / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(directory / name, target)
+    _log.info("BIOS packed from %s: %s", directory, ", ".join(map(str, files)))
 
 
 def _write_bottom_picture(target: Path, request: GameRequest, base: Base) -> None:

@@ -50,6 +50,17 @@ def data_dir() -> Path:
     return _xdg("XDG_DATA_HOME", ".local/share", "APPDATA")
 
 
+def bios_dir(core: str = "") -> Path:
+    """The BIOS files to pack with every game of ``core`` (``<data>/bios/<core>``).
+
+    Laid out as in the console's system folder (``fbneo/neogeo.zip``); the
+    CIA carries them and RetroArch reads them as part of the game's system
+    folder.
+    """
+    root = data_dir() / "bios"
+    return root / core if core else root
+
+
 def cache_dir() -> Path:
     """Directory for disposable files (build scratch space)."""
     return _xdg("XDG_CACHE_HOME", ".cache", "LOCALAPPDATA")

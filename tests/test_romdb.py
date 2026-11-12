@@ -218,7 +218,7 @@ def test_arcade_romset(tmp_path: Path, systems: SystemCatalog) -> None:
     request = make_request(rom=romset, console="mame", long_name="Street Fighter II",
                            output=tmp_path / "o.cia")  # fmt: skip
     assert request.arcade and request.content_name == "sf2.zip"
-    assert 'system_dir = "sdmc:/emu_bios"' in manifest_text(request)
+    assert 'system_dir = "sdmc:/saves/mame/Street Fighter II/system"' in manifest_text(request)
     base_dir = tmp_path / "base"
     base_dir.mkdir()
     (base_dir / "retroarch.elf").write_bytes(b"\x7fELF")
