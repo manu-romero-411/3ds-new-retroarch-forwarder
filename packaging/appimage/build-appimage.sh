@@ -52,6 +52,8 @@ install_python() {
     [[ -n "${python}" ]] || die "uv did not install Python ${PYTHON_VERSION}"
     mkdir -p "${appdir}/usr"
     cp -a "${python}" "${appdir}/usr/python"
+    # uv marks its Pythons as externally managed (PEP 668); this copy is ours.
+    find "${appdir}/usr/python/lib" -maxdepth 2 -name EXTERNALLY-MANAGED -delete
 
     log_info "Installing the program and PySide6-Essentials ${PYSIDE_VERSION}"
     "${appdir}/usr/python/bin/python3" -m pip install --quiet --no-compile --no-warn-script-location \
