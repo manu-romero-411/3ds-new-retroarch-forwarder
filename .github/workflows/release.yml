@@ -224,10 +224,12 @@ jobs:
         run: |
           "build/windows-dist/3DS Forwarder/cli/3ds-forwarder.exe" --version
           "build/windows-dist/3DS Forwarder/cli/3ds-forwarder.exe" doctor --offline
-          # The GUI has no console: open its window, quit, and show its log.
+          "build/windows-dist/3DS Forwarder/cli/3ds-forwarder.exe" --version | grep -qv unknown
+          # The GUI: open its window and quit. Started from a shell it logs to
+          # the inherited stderr; from Explorer, to its log file.
           FORWARDER3DS_SMOKE_TEST=1 QT_QPA_PLATFORM=offscreen \
             timeout 180 "build/windows-dist/3DS Forwarder/3DS Forwarder.exe"
-          cat "${LOCALAPPDATA}/3ds-forwarder/3ds-forwarder.log"
+          cat "${LOCALAPPDATA}/3ds-forwarder/3ds-forwarder.log" 2> /dev/null || true
 
       - uses: actions/upload-artifact@v7
         with:

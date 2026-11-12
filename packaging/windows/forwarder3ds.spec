@@ -10,14 +10,18 @@ from PyInstaller.utils.hooks import collect_data_files
 
 HERE = Path(SPECPATH)
 DATAS = collect_data_files("forwarder3ds")
-# Imported only when present (the jingle preview).
-HIDDEN = ["PySide6.QtMultimedia", "PySide6.QtSvg"]
+# Imported by name at run time, which PyInstaller cannot see: the version
+# (forwarder3ds/version.py) and the jingle preview.
+VERSION = ["forwarder3ds._version"]
+HIDDEN = VERSION + ["PySide6.QtMultimedia", "PySide6.QtSvg"]
 EXCLUDES = ["tkinter", "PySide6.QtWebEngineCore", "PySide6.QtQml", "PySide6.QtQuick"]
 
 gui = Analysis(
     [str(HERE / "launch_gui.py")], datas=DATAS, hiddenimports=HIDDEN, excludes=EXCLUDES
 )
-cli = Analysis([str(HERE / "launch_cli.py")], datas=DATAS, excludes=EXCLUDES + ["PySide6"])
+cli = Analysis(
+    [str(HERE / "launch_cli.py")], datas=DATAS, hiddenimports=VERSION, excludes=EXCLUDES + ["PySide6"]
+)
 
 gui_exe = EXE(
     PYZ(gui.pure),
