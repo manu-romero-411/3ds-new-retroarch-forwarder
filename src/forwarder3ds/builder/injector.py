@@ -358,9 +358,7 @@ def write_romfs(directory: Path, request: GameRequest, base: Base) -> Path:
         (romfs / CORE_OPTIONS_FILE).write_text(
             options_file_text(request.core_options), encoding="utf-8"
         )
-    remap = remap_text(request.remap)
-    if remap:
-        (romfs / REMAP_FILE).write_text(remap, encoding="utf-8")
+    (romfs / REMAP_FILE).write_text(remap_text(request.remap, request.console), encoding="utf-8")
     return romfs
 
 

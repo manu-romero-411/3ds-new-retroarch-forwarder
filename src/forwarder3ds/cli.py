@@ -46,7 +46,7 @@ from forwarder3ds.artwork.libretro import (
     load_database,
     thumbnail_url,
 )
-from forwarder3ds.core.names import suggest_title
+from forwarder3ds.core.names import strip_tags, suggest_title
 from forwarder3ds.core.romdb import Identification, MatchKind, identify
 from forwarder3ds.core.systems import System
 from forwarder3ds.core.fonts import font_path
@@ -206,10 +206,15 @@ def _request_from_args(args: argparse.Namespace, settings: Settings, scratch: Pa
         system = _system_for(rom, pick(args.console, loaded.console if loaded else ""))
         found = _identify(rom, system) if system else None
     db_game = found.game if found else None
+    # The database's full name (No-Intro's, with its tags) and, for the
+    # short one, the same without the tags.
     long_name = pick(args.long_name, loaded.long_name if loaded else "")
-    long_name = long_name or (db_game.title if db_game else suggest_title(rom.name))
+    long_name = long_name or (db_game.name if db_game else suggest_title(rom.name))
     if not long_name:
         raise BuildError("--long-name is required (no name could be derived).")
+    short_name = pick(args.short_name, loaded.short_name if loaded else "")
+    short_name = short_name or (strip_tags(db_game.name) if db_game else "")
+    plain_name = short_name or strip_tags(long_name)
 
     jingle, platform_logo = None, None
     try:
@@ -224,10 +229,10 @@ def _request_from_args(args: argparse.Namespace, settings: Settings, scratch: Pa
     system = _system_for(rom, pick(args.console, loaded.console if loaded else ""))
     card = _Card(
         console=system.console if system else "",
-        title=long_name,
+        title=plain_name,
         year=args.year if args.year is not None else (db_game.year if db_game else ""),
     )
-    images = _images(args, settings, long_name, loaded_images, scratch, card)
+    images = _images(args, settings, plain_name, loaded_images, scratch, card)
 
     if args.output is not None:
         output = ensure_cia_extension(args.output)
@@ -245,7 +250,7 @@ def _request_from_args(args: argparse.Namespace, settings: Settings, scratch: Pa
         core=pick(args.core, loaded.core if loaded else ""),
         folder=pick(args.folder, loaded.folder if loaded else ""),
         long_name=long_name,
-        short_name=pick(args.short_name, loaded.short_name if loaded else ""),
+        short_name=short_name,
         manufacturer=pick(args.manufacturer, loaded.manufacturer if loaded else "")
         or (db_game.publisher if db_game else "")
         or settings.general.manufacturer,

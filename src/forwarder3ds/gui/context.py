@@ -153,7 +153,7 @@ class AppContext:  # pylint: disable=too-many-instance-attributes
             logo = None
         return render_card_png(
             console=project.console,
-            title=project.title,
+            title=project.plain_title,
             name=project.tag_name,
             year=project.tag_year,
             logo=logo,

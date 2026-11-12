@@ -34,10 +34,38 @@ releases are picked up without editing anything:
 |---|---|---|
 | `.deb` | Debian stable; the two newest supported Ubuntu LTS | `amd64`, `arm64` |
 | `.rpm` | the two newest stable Fedora releases | `x86_64`, `aarch64` |
+| AppImage | any Linux desktop with glibc 2.28+ (built on Ubuntu 22.04) | `x86_64`, `aarch64` |
+| `.zip` | Windows 10/11 (portable folder) | `x64` |
 
 File names carry the distribution, e.g.
 `3ds-new-retroarch-forwarder_0.1.0-1~ubuntu24.04_arm64.deb` or
 `3ds-new-retroarch-forwarder-0.1.0-1.fc43.aarch64.rpm`.
+
+## AppImage
+
+[`appimage/build-appimage.sh`](appimage/build-appimage.sh), run as root in
+`ubuntu:22.04`, puts everything in one file that opens the GUI when
+double-clicked: its own Python (python-build-standalone, installed with
+`uv`), the program with a trimmed PySide6-Essentials, statically linked
+`makerom` and `bannertool`, and the RetroArch bases. `AppRun` points the
+program at the bundled toolchain (`FORWARDER3DS_TOOLCHAIN`); `--cli` as the
+first argument runs the command line tool instead
+(`./3DS_Forwarder-*.AppImage --cli build ...`). The jingle preview plays
+through `pw-play`, `paplay` or `aplay`, as with the bundled PySide6 of the
+`.deb`s.
+
+## Windows
+
+[`windows/build-windows.sh`](windows/build-windows.sh) runs in Git Bash on
+Windows after `toolchain/build-tools.sh --static` has built `makerom.exe`
+and `bannertool.exe` in an MSYS2 MINGW64 shell. It freezes the program with
+PyInstaller ([`windows/forwarder3ds.spec`](windows/forwarder3ds.spec)) into
+a folder holding `3DS Forwarder.exe` (the GUI, no console window),
+`3ds-forwarder.exe` (the command line tool) and `toolchain/` (the two
+programs and the RetroArch bases, found beside the executable), and zips it.
+Settings and data go to `%APPDATA%\3ds-forwarder`, the cache to
+`%LOCALAPPDATA%\3ds-forwarder`. Fonts are looked up in the Windows font
+folders (there is no fontconfig).
 
 ## Dependencies
 
@@ -114,8 +142,12 @@ ordinary commits do not trigger it. It then:
    package, then installs it in a clean container, **builds a real game CIA
    with it**, reads it back, opens the main window off-screen and removes the
    package again;
-5. publishes a GitHub release with every package, `install.sh`,
-   `retroarch-bases.tar.gz` and a `SHA256SUMS` file.
+5. builds an AppImage per architecture (in `ubuntu:22.04`) and the Windows
+   x64 zip (on `windows-latest`), and checks that each one starts and finds
+   its toolchain (`doctor --offline`);
+6. publishes a GitHub release with every package, the AppImages, the
+   Windows zip, `install.sh`, `retroarch-bases.tar.gz` and a `SHA256SUMS`
+   file.
 
 The maintainer field can be changed with the repository variable
 `PACKAGE_MAINTAINER`.

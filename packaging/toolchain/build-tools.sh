@@ -8,7 +8,9 @@
 # machine (or in the container) whose system and architecture the binaries
 # are for: it needs git, make, a C and a C++ compiler. --static links
 # everything statically (meant for an Alpine/musl container), so the result
-# runs on any Linux of the same architecture.
+# runs on any Linux of the same architecture. In an MSYS2 MINGW64 shell it
+# builds the Windows programs (makerom.exe, bannertool.exe); use --static
+# there too, so they need no MinGW DLLs.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -20,6 +22,13 @@ STATIC=0
 OUT_DIR=""
 JOBS="$(nproc 2> /dev/null || echo 2)"
 WORK_DIR=""
+# Executable suffix: .exe when building for Windows (MSYS2/MinGW).
+# Executable suffix and compilers: MinGW's gcc/g++ when building for Windows.
+case "$(uname -s)" in
+    MINGW* | MSYS* | CYGWIN*) EXE=".exe" CC_CMD="gcc" CXX_CMD="g++" ;;
+    *) EXE="" CC_CMD="cc" CXX_CMD="c++" ;;
+esac
+readonly EXE CC_CMD CXX_CMD
 
 log() {
     local tag="$1"
@@ -67,16 +76,16 @@ fetch() {
 }
 
 build_makerom() {
-    local src="${WORK_DIR}/Project_CTR" cc="cc" cxx="c++"
+    local src="${WORK_DIR}/Project_CTR" cc="${CC_CMD}" cxx="${CXX_CMD}"
     fetch "${MAKEROM_REPO}" "${MAKEROM_REF}" "${src}"
     if [[ "${STATIC}" -eq 1 ]]; then
-        cc="cc -static"
-        cxx="c++ -static"
+        cc="${CC_CMD} -static"
+        cxx="${CXX_CMD} -static"
     fi
     log_info "Building makerom"
     make -C "${src}/makerom" -j"${JOBS}" CC="${cc}" CXX="${cxx}" deps > /dev/null
     make -C "${src}/makerom" -j"${JOBS}" CC="${cc}" CXX="${cxx}" > /dev/null
-    install -D -m 0755 "${src}/makerom/bin/makerom" "${OUT_DIR}/bin/makerom"
+    install -D -m 0755 "${src}/makerom/bin/makerom${EXE}" "${OUT_DIR}/bin/makerom${EXE}"
     install -D -m 0644 "${src}/makerom/LICENSE" "${OUT_DIR}/LICENSES/makerom.txt"
 }
 
@@ -95,13 +104,13 @@ build_bannertool() {
     while IFS= read -r -d '' file; do
         out="${obj}/$(basename "${file%.*}").o"
         case "${file}" in
-            *.c) cc "${flags[@]}" -std=gnu11 -c "${file}" -o "${out}" ;;
-            *.cpp) c++ "${flags[@]}" -std=gnu++11 -c "${file}" -o "${out}" ;;
+            *.c) "${CC_CMD}" "${flags[@]}" -std=gnu11 -c "${file}" -o "${out}" ;;
+            *.cpp) "${CXX_CMD}" "${flags[@]}" -std=gnu++11 -c "${file}" -o "${out}" ;;
         esac
         objects+=("${out}")
     done < <(find "${src}/source" -type f \( -name '*.c' -o -name '*.cpp' \) -print0 | sort -z)
-    c++ "${link[@]}" "${objects[@]}" -o "${obj}/bannertool"
-    install -D -m 0755 "${obj}/bannertool" "${OUT_DIR}/bin/bannertool"
+    "${CXX_CMD}" "${link[@]}" "${objects[@]}" -o "${obj}/bannertool${EXE}"
+    install -D -m 0755 "${obj}/bannertool${EXE}" "${OUT_DIR}/bin/bannertool${EXE}"
     install -D -m 0644 "${src}/LICENSE.txt" "${OUT_DIR}/LICENSES/bannertool.txt"
 }
 
@@ -125,14 +134,14 @@ write_versions() {
 # (makerom then exits non-zero): proof that the binary starts on this system.
 check_runs() {
     local tool="$1" expected="$2" output
-    output="$("${OUT_DIR}/bin/${tool}" 2>&1 || true)"
+    output="$("${OUT_DIR}/bin/${tool}${EXE}" 2>&1 || true)"
     [[ "${output}" == *"${expected}"* ]] || die "The built ${tool} does not run: ${output:0:200}"
 }
 
 main() {
     parse_args "$@"
     local tool
-    for tool in git make cc c++; do
+    for tool in git make "${CC_CMD}" "${CXX_CMD}"; do
         command -v "${tool}" > /dev/null || die "${tool} is required"
     done
     mkdir -p "${OUT_DIR}"
@@ -140,7 +149,7 @@ main() {
     WORK_DIR="$(mktemp -d)"
     build_makerom
     build_bannertool
-    strip "${OUT_DIR}/bin/makerom" "${OUT_DIR}/bin/bannertool" 2> /dev/null || true
+    strip "${OUT_DIR}/bin/makerom${EXE}" "${OUT_DIR}/bin/bannertool${EXE}" 2> /dev/null || true
     write_versions
     check_runs makerom "CTR MAKEROM"
     check_runs bannertool "bannertool v"

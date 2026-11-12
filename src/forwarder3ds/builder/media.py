@@ -20,6 +20,7 @@ from PIL import Image, UnidentifiedImageError
 
 from forwarder3ds.builder.errors import BuildError
 from forwarder3ds.builder.placeholders import write_silence_wav
+from forwarder3ds.core import paths
 from forwarder3ds.ctr.formats import (
     AUDIO_CHANNELS,
     AUDIO_SAMPLE_RATE,
@@ -170,7 +171,9 @@ def _convert_with_ffmpeg(src: Path, dst: Path, ffmpeg: Path | None) -> None:
         "-ac", str(AUDIO_CHANNELS), "-ar", str(AUDIO_SAMPLE_RATE),
         "-acodec", "pcm_s16le", "-t", str(MAX_AUDIO_SECONDS), str(dst),
     ]  # fmt: skip
-    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    result = subprocess.run(
+        cmd, capture_output=True, text=True, check=False, creationflags=paths.NO_WINDOW
+    )
     if result.returncode != 0:
         raise BuildError(f"ffmpeg could not convert {src.name}: {result.stderr.strip()}")
 

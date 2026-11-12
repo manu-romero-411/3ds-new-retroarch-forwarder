@@ -257,11 +257,13 @@ def find_toolchain(settings: ToolchainSettings | None = None) -> Toolchain:
     """Resolve every tool (see the module docstring for the order)."""
     settings = settings or ToolchainSettings()
     makerom = (
-        _explicit(settings.makerom) or _in_toolchain_dirs("bin/makerom") or _on_path("makerom")
+        _explicit(settings.makerom)
+        or _in_toolchain_dirs(f"bin/{paths.executable('makerom')}")
+        or _on_path("makerom")
     )
     bannertool = (
         _explicit(settings.bannertool)
-        or _in_toolchain_dirs("bin/bannertool")
+        or _in_toolchain_dirs(f"bin/{paths.executable('bannertool')}")
         or _on_path("bannertool")
     )
     bases = (
@@ -284,7 +286,13 @@ def run_tool(cmd: list[str], what: str, cwd: Path | None = None) -> str:
     _log.debug("Running %s", " ".join(cmd))
     try:
         result = subprocess.run(
-            cmd, capture_output=True, text=True, check=False, cwd=cwd, errors="replace"
+            cmd,
+            capture_output=True,
+            text=True,
+            check=False,
+            cwd=cwd,
+            errors="replace",
+            creationflags=paths.NO_WINDOW,
         )
     except OSError as exc:
         raise BuildError(f"Cannot run {cmd[0]} ({what}): {exc}") from exc

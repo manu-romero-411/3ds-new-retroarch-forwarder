@@ -121,10 +121,16 @@ class MainWindow(QMainWindow):  # pylint: disable=too-many-instance-attributes
         import_ = self._action(
             self.tr("Import…"), "document-open", pixmap.SP_DialogOpenButton, QKeySequence("Ctrl+O")
         )
-        generate = self._action(
-            self.tr("Generate CIA"),
+        save = self._action(
+            self.tr("Save project"),
             "document-save",
             pixmap.SP_DialogSaveButton,
+            QKeySequence(QKeySequence.StandardKey.Save),
+        )
+        generate = self._action(
+            self.tr("Generate CIA"),
+            "run-build",
+            pixmap.SP_MediaPlay,
             QKeySequence("Ctrl+B"),
         )
         settings = self._action(
@@ -135,9 +141,10 @@ class MainWindow(QMainWindow):  # pylint: disable=too-many-instance-attributes
         )
         new.triggered.connect(self._new_project)
         import_.triggered.connect(self._import)
+        save.triggered.connect(self._save_current)
         generate.triggered.connect(self._generate_current)
         settings.triggered.connect(lambda _checked=False: self._open_settings())
-        self._actions = [new, import_, generate, settings]
+        self._actions = [new, import_, save, generate, settings]
 
         toolbar = QToolBar(self.tr("Main"))
         toolbar.setObjectName("main-toolbar")
@@ -146,6 +153,7 @@ class MainWindow(QMainWindow):  # pylint: disable=too-many-instance-attributes
         toolbar.addAction(new)
         toolbar.addAction(import_)
         toolbar.addSeparator()
+        toolbar.addAction(save)
         toolbar.addAction(generate)
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
@@ -191,6 +199,16 @@ class MainWindow(QMainWindow):  # pylint: disable=too-many-instance-attributes
             )
 
     # ── Tabs ─────────────────────────────────────────────────────────────
+
+    def _save_current(self) -> None:
+        """Save the open project (every open one from the library), without building."""
+        editor = self._tabs.currentWidget()
+        editors = [editor] if isinstance(editor, ProjectEditor) else self._editors()
+        for each in editors:
+            each.save()
+        if editors:
+            names = ", ".join(each.project.title for each in editors[:3])
+            self.statusBar().showMessage(self.tr("Saved: {names}").format(names=names), 4000)
 
     def _editors(self) -> list[ProjectEditor]:
         return [

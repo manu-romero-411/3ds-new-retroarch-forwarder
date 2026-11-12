@@ -70,12 +70,13 @@ def test_project_tab_follows_the_database(
     assert isinstance(editor, ProjectEditor)
     _pump(app, lambda: editor.project.db_name)
     assert editor.project.db_name == "Super Mario World (USA)"
-    assert editor.project.long_name == "Super Mario World"
-    assert editor.project.folder == "Super Mario World"
+    assert editor.project.long_name == "Super Mario World (USA)"  # No-Intro's full name
+    assert editor.project.short_name == "Super Mario World"
+    assert editor.project.folder == "Super Mario World (USA)"
     assert editor._title_id._title_id_edit.text().startswith("0x000400000F")
     editor.save()
     (stored,) = context.store.list()
-    assert stored.long_name == "Super Mario World"
+    assert stored.long_name == "Super Mario World (USA)"
     assert context.problem(stored) is not None  # no base built here
     window._close_tab(1)
     window.close()

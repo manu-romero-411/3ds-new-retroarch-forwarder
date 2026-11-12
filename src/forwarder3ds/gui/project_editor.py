@@ -53,7 +53,7 @@ from forwarder3ds.artwork.steamgriddb import AssetKind
 from forwarder3ds.core.catalog import JINGLE_RULES, list_jingles, validate_jingle
 from forwarder3ds.core.game_config import ScreenMode
 from forwarder3ds.core.logs import get_logger
-from forwarder3ds.core.names import database_title, save_folder_name, suggest_title
+from forwarder3ds.core.names import database_title, save_folder_name, strip_tags, suggest_title
 from forwarder3ds.core.projects import Asset, BannerStyle, Project
 from forwarder3ds.core.romdb import DbGame
 from forwarder3ds.core.settings import DEFAULT_MANUFACTURER
@@ -425,13 +425,13 @@ class ProjectEditor(QScrollArea):  # pylint: disable=too-many-instance-attribute
             return
         previous = self._project.long_name
         self._project.long_name = text.strip()
-        self._follow(self._folder, save_folder_name(previous), save_folder_name(text))
+        self._follow(self._folder, {save_folder_name(previous)}, save_folder_name(text))
         self._on_edited()
 
     @staticmethod
-    def _follow(edit: QLineEdit, old: str, new: str) -> None:
-        """Set ``edit`` to ``new`` unless the user changed it from ``old``."""
-        if edit.text().strip() in ("", old) and new:
+    def _follow(edit: QLineEdit, old: set[str], new: str) -> None:
+        """Set ``edit`` to ``new`` unless the user changed it from the ``old`` values."""
+        if (edit.text().strip() in old or not edit.text().strip()) and new:
             edit.setText(new)
 
     def _fill_cores(self) -> None:
@@ -462,15 +462,18 @@ class ProjectEditor(QScrollArea):  # pylint: disable=too-many-instance-attribute
 
     def _on_identified(self, game: DbGame | None, user: bool) -> None:
         project = self._project
-        previous_title = suggest_title(project.rom_path.name)
+        # What the names were set to automatically before (now or by older versions).
+        previous = {suggest_title(project.rom_path.name)}
         if project.db_name:
-            previous_title = database_title(project.db_name)
+            name = project.db_name
+            previous |= {name, strip_tags(name), database_title(name)}
         project.db_name = game.name if game else ""
         project.developer = game.developer if game else ""
         project.year = game.year if game else ""
         if game is not None:
-            self._follow(self._long_name, previous_title, game.title)
-            self._follow(self._short_name, previous_title, game.title)
+            # The database's full name, as No-Intro writes it; the short one without tags.
+            self._follow(self._long_name, previous, game.name)
+            self._follow(self._short_name, previous, strip_tags(game.name))
             current = self._publisher.text().strip()
             if game.publisher and current in ("", DEFAULT_MANUFACTURER):
                 self._publisher.setText(game.publisher)
@@ -539,7 +542,7 @@ class ProjectEditor(QScrollArea):  # pylint: disable=too-many-instance-attribute
     def _icon_from_sgdb(self) -> None:
         self._sgdb.pick(
             AssetKind.ICON,
-            self._project.long_name,
+            self._project.plain_title,
             lambda data, _source: data and self._set_asset(Asset.ICON, data),
         )
 
@@ -590,7 +593,7 @@ class ProjectEditor(QScrollArea):  # pylint: disable=too-many-instance-attribute
         card = self._banner_style.currentData() == BannerStyle.CARD
         self._card_box.setVisible(card)
         self._banner_download.setVisible(not card)
-        self._card_name.setPlaceholderText(self._project.title)
+        self._card_name.setPlaceholderText(self._project.plain_title)
         self._card_year.setPlaceholderText(self._project.year or self.tr("Year"))
         self._card_name.setEnabled(self._card_show_name.isChecked())
 
@@ -648,7 +651,7 @@ class ProjectEditor(QScrollArea):  # pylint: disable=too-many-instance-attribute
     def _logo_from_sgdb(self) -> None:
         self._sgdb.pick(
             AssetKind.LOGO,
-            self._project.long_name,
+            self._project.plain_title,
             lambda data, _source: data and self._set_card_asset(Asset.LOGO, data),
         )
 
@@ -663,7 +666,7 @@ class ProjectEditor(QScrollArea):  # pylint: disable=too-many-instance-attribute
     def _download_banner(self) -> None:
         style = self._project.banner_style
         if style is BannerStyle.STEAMGRIDDB:
-            self._sgdb.pick(AssetKind.HERO, self._project.long_name, self._on_hero)
+            self._sgdb.pick(AssetKind.HERO, self._project.plain_title, self._on_hero)
             return
         kind = _THUMBNAILS.get(style)
         system = self._system()
@@ -698,7 +701,7 @@ class ProjectEditor(QScrollArea):  # pylint: disable=too-many-instance-attribute
             self._banner_source.setText(source)
             self._set_asset(Asset.BANNER, compose_banner_png_bytes(hero, logo))
 
-        self._sgdb.pick(AssetKind.LOGO, self._project.long_name, on_logo)
+        self._sgdb.pick(AssetKind.LOGO, self._project.plain_title, on_logo)
 
     # ── Jingle ───────────────────────────────────────────────────────────
 

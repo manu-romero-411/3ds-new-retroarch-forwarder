@@ -126,7 +126,14 @@ def test_remap_round_trip() -> None:
     assert "_x " not in text
     entries = dict(line.replace('"', "").split(" = ") for line in text.splitlines())
     assert parse_remap(entries) == {"a": "b", "b": "a", "select": "none"}
-    assert remap_text({}) == ""
+    # the Circle Pad drives the D-Pad, unless it is made a PlayStation's stick
+    assert remap_text({}) == 'input_player1_analog_dpad_mode = "1"\n'
+    assert remap_text({"circle_pad": "dpad"}) == remap_text({})
+    stick = remap_text({"circle_pad": "stick"}, "psx")
+    assert 'input_libretro_device_p1 = "517"' in stick
+    assert 'input_player1_analog_dpad_mode = "0"' in stick
+    entries = dict(line.replace('"', "").split(" = ") for line in stick.splitlines())
+    assert parse_remap(entries) == {"circle_pad": "stick"}
     assert "x" not in console_targets("gb") and "x" in console_targets("snes")
 
 
@@ -150,7 +157,9 @@ def test_romfs_seeds_settings(tmp_path: Path) -> None:
     assert "rgui_bg_dark_color" in (romfs / "rgui_theme.cfg").read_text(encoding="utf-8")
     options = (romfs / "game.opt").read_text(encoding="utf-8")
     assert options == 'gambatte_gb_colorization = "auto"\n'
-    assert (romfs / "game.rmp").read_text(encoding="utf-8") == 'input_player1_btn_a = "0"\n'
+    assert (romfs / "game.rmp").read_text(encoding="utf-8") == (
+        'input_player1_btn_a = "0"\ninput_player1_analog_dpad_mode = "1"\n'
+    )
 
 
 def test_projects_store(tmp_path: Path) -> None:

@@ -15,7 +15,7 @@ set -euo pipefail
 # shellcheck source=packaging/common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
-readonly BASE_DEPENDS="python3 (>= 3.11), python3-requests, python3-pil, libc6, libstdc++6, libgcc-s1"
+readonly BASE_DEPENDS="python3 (>= 3.11), python3-requests, python3-pil, python3-fonttools, libc6, libstdc++6, libgcc-s1"
 readonly SYSTEM_QT_DEPENDS="python3-pyside6.qtcore, python3-pyside6.qtgui, python3-pyside6.qtwidgets, python3-pyside6.qtsvg"
 readonly SYSTEM_QT_RECOMMENDS="python3-pyside6.qtmultimedia, qt6-wayland"
 # What the PySide6 wheels expect from the system (xcb and wayland platforms).

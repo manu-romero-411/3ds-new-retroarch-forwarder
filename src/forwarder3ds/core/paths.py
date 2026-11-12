@@ -1,9 +1,10 @@
 """Where things live: per-user directories, bundled data and the toolchain.
 
 User files follow the XDG base directory spec (``~/.config``,
-``~/.local/share``, ``~/.cache``). Nothing is ever written next to the
-installed code, so the package can live in a read-only prefix such as
-``/opt/3ds-new-retroarch-forwarder``.
+``~/.local/share``, ``~/.cache``); on Windows they go to ``%APPDATA%`` and
+``%LOCALAPPDATA%``. Nothing is ever written next to the installed code, so
+the package can live in a read-only prefix such as
+``/opt/3ds-new-retroarch-forwarder`` (or an AppImage).
 
 The native toolchain (``makerom``, ``bannertool`` and the pre-built
 RetroArch bases) is looked up in a ``toolchain/`` directory, see
@@ -13,6 +14,7 @@ RetroArch bases) is looked up in a ``toolchain/`` directory, see
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 from importlib import resources
 from pathlib import Path
@@ -27,24 +29,40 @@ TOOLCHAIN_DIR_NAME = "toolchain"
 _PACKAGE_DIR = Path(__file__).resolve().parent.parent
 
 
-def _xdg(variable: str, fallback: str) -> Path:
+_WINDOWS = sys.platform == "win32"
+
+
+def _xdg(variable: str, fallback: str, windows: str) -> Path:
+    """``$variable`` (XDG), or ``%windows%`` on Windows, else ``~/fallback``; plus our folder."""
     value = os.environ.get(variable, "").strip()
+    if not value and _WINDOWS:
+        value = os.environ.get(windows, "").strip()
     return (Path(value) if value else Path.home() / fallback) / USER_DIR_NAME
 
 
 def config_dir() -> Path:
     """Directory holding ``config.ini``."""
-    return _xdg("XDG_CONFIG_HOME", ".config")
+    return _xdg("XDG_CONFIG_HOME", ".config", "APPDATA")
 
 
 def data_dir() -> Path:
     """Directory for user data: the Title ID registry, extra jingles and logos."""
-    return _xdg("XDG_DATA_HOME", ".local/share")
+    return _xdg("XDG_DATA_HOME", ".local/share", "APPDATA")
 
 
 def cache_dir() -> Path:
     """Directory for disposable files (build scratch space)."""
-    return _xdg("XDG_CACHE_HOME", ".cache")
+    return _xdg("XDG_CACHE_HOME", ".cache", "LOCALAPPDATA")
+
+
+#: ``subprocess`` flags for console programs: on Windows, no console window
+#: flashing up from the graphical program.
+NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+
+def executable(name: str) -> str:
+    """``name`` as an executable file name on this system (``makerom.exe`` on Windows)."""
+    return f"{name}.exe" if _WINDOWS else name
 
 
 def config_file() -> Path:
@@ -80,11 +98,12 @@ def bundled(name: str) -> Path:
 def toolchain_dirs() -> list[Path]:
     """Candidate toolchain directories, most specific first.
 
-    1. ``$FORWARDER3DS_TOOLCHAIN``;
-    2. ``<prefix>/toolchain`` where the package sits in ``<prefix>/lib`` (the
+    1. ``$FORWARDER3DS_TOOLCHAIN`` (the AppImage sets it);
+    2. ``toolchain`` beside the program, for the Windows build (PyInstaller);
+    3. ``<prefix>/toolchain`` where the package sits in ``<prefix>/lib`` (the
        .deb/.rpm layout) or ``<prefix>/src`` (a git checkout);
-    3. ``<venv>/../toolchain`` (``install.sh`` puts the venv next to it);
-    4. ``~/.local/share/3ds-forwarder/toolchain``.
+    4. ``<venv>/../toolchain`` (``install.sh`` puts the venv next to it);
+    5. ``~/.local/share/3ds-forwarder/toolchain``.
 
     Missing directories are kept out of the list.
     """
@@ -92,6 +111,8 @@ def toolchain_dirs() -> list[Path]:
     override = os.environ.get(TOOLCHAIN_ENV, "").strip()
     if override:
         candidates.append(Path(override).expanduser())
+    if getattr(sys, "frozen", False):  # a PyInstaller build: the toolchain sits beside it
+        candidates.append(Path(sys.executable).resolve().parent / TOOLCHAIN_DIR_NAME)
     candidates.append(_PACKAGE_DIR.parent.parent / TOOLCHAIN_DIR_NAME)
     candidates.append(Path(sys.prefix).parent / TOOLCHAIN_DIR_NAME)
     candidates.append(data_dir() / TOOLCHAIN_DIR_NAME)

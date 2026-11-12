@@ -1,7 +1,9 @@
 """Edit the game's controls on a picture of the 3DS.
 
 Each 3DS button gets a list of what the game sees when it is pressed: one
-of the console's buttons, or nothing. This is a RetroArch *remap*
+of the console's buttons, or nothing. The Circle Pad drives the D-Pad; on a
+console with an analog controller (the PlayStation's DualShock) it can be
+its stick instead. This is a RetroArch *remap*
 (``game.rmp``): RetroArch's menu keeps the 3DS layout, and the menu itself
 opens from the touch screen. Click a button on the picture or use the list.
 """
@@ -22,6 +24,10 @@ from PySide6.QtWidgets import (
 )
 
 from forwarder3ds.core.game_config import (
+    ANALOG_DEVICES,
+    CIRCLE_PAD,
+    CIRCLE_PAD_DPAD,
+    CIRCLE_PAD_STICK,
     CONSOLE_BUTTONS,
     UNMAPPED,
     console_targets,
@@ -60,6 +66,11 @@ class ButtonMapDialog(QDialog):
             combo.installEventFilter(self)
             self._combos[button] = combo
             form.addRow(f"{CONSOLE_BUTTONS[button]}:", combo)
+        self._circle_pad = QComboBox()
+        self._circle_pad.addItem(self.tr("D-Pad"), CIRCLE_PAD_DPAD)
+        self._circle_pad.addItem(self.tr("Left stick (DualShock)"), CIRCLE_PAD_STICK)
+        if console in ANALOG_DEVICES:
+            form.addRow(self.tr("Circle Pad:"), self._circle_pad)
         self.set_remap(remap)
 
         defaults = QPushButton(self.tr("Restore defaults"))
@@ -117,13 +128,18 @@ class ButtonMapDialog(QDialog):
             combo.blockSignals(True)
             combo.setCurrentIndex(index)
             combo.blockSignals(False)
+        stick = remap.get(CIRCLE_PAD) == CIRCLE_PAD_STICK
+        self._circle_pad.setCurrentIndex(self._circle_pad.findData(
+            CIRCLE_PAD_STICK if stick else CIRCLE_PAD_DPAD
+        ))  # fmt: skip
         self._refresh()
 
     def remap(self) -> dict[str, str]:
         """The buttons that no longer do what they do by default."""
-        return normalize_remap(
-            {button: str(combo.currentData()) for button, combo in self._combos.items()}
-        )
+        remap = {button: str(combo.currentData()) for button, combo in self._combos.items()}
+        if self._circle_pad.isVisibleTo(self):
+            remap[CIRCLE_PAD] = str(self._circle_pad.currentData())
+        return normalize_remap(remap)
 
     def _refresh(self) -> None:
         mapping = {button: str(combo.currentData()) for button, combo in self._combos.items()}

@@ -102,6 +102,15 @@ curl -fsSL https://raw.githubusercontent.com/manu-romero-411/3ds-new-retroarch-f
 # options: --system, --version vX.Y.Z, --static, --download-bases, --no-gui, --uninstall
 ```
 
+**Any Linux desktop, no installation:** download
+`3DS_Forwarder-*-x86_64.AppImage` (or `aarch64`), make it executable and
+double-click it. `./3DS_Forwarder-*.AppImage --cli ...` runs the command
+line tool.
+
+**Windows 10/11 (x64):** unzip `3DS_Forwarder-*-windows-x64.zip` anywhere and
+run `3DS Forwarder.exe`; `3ds-forwarder.exe` in the same folder is the
+command line tool.
+
 See [packaging/README.md](packaging/README.md) for how packages are built.
 
 ## Graphical interface

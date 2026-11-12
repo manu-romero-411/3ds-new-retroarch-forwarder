@@ -5,7 +5,9 @@ the first time it boots (see ``retroarch/patches/0001``):
 
 * :class:`ScreenSettings` becomes lines of the seed ``retroarch.cfg``;
 * :func:`remap_text` is ``game.rmp``, a RetroArch *remap*: it changes the
-  buttons the game sees, while the menu keeps the console's own layout.
+  buttons the game sees, while the menu keeps the console's own layout. It
+  also says what the Circle Pad drives (:data:`CIRCLE_PAD`): the D-Pad, or
+  a PlayStation game's DualShock stick.
 
 Edited later on the SD card, those files win: the CIA only seeds them.
 """
@@ -24,6 +26,22 @@ _ASPECT_SQUARE = 21
 _ASPECT_CORE = 22
 _ASPECT_CUSTOM = 23
 _ASPECT_FULL = 24
+
+
+# RetroArch's analog_dpad_mode: 0 off, 1 the left stick drives the D-Pad.
+_ANALOG_DPAD_OFF, _ANALOG_DPAD_LEFT = 0, 1
+# pcsx_rearmed's DualShock: RETRO_DEVICE_SUBCLASS(RETRO_DEVICE_ANALOG, 1).
+_DEVICE_DUALSHOCK = (2 << 8) | 5
+
+#: A remap entry of its own: what the Circle Pad drives in the game.
+CIRCLE_PAD = "circle_pad"
+#: ... the D-Pad (the default, never stored);
+CIRCLE_PAD_DPAD = "dpad"
+#: ... an analog stick, on consoles of :data:`ANALOG_DEVICES`.
+CIRCLE_PAD_STICK = "stick"
+#: Consoles whose games can take the Circle Pad as a stick, and the libretro
+#: controller that gives them one (the PlayStation's DualShock).
+ANALOG_DEVICES = {"psx": _DEVICE_DUALSHOCK}
 
 
 class ScreenMode(str, Enum):
@@ -172,6 +190,10 @@ def normalize_remap(remap: dict[str, str]) -> dict[str, str]:
     """``remap`` without unknown buttons and without buttons left as they are."""
     result = {}
     for button, target in remap.items():
+        if button == CIRCLE_PAD:
+            if target == CIRCLE_PAD_STICK:
+                result[button] = target
+            continue
         if button not in CONSOLE_BUTTONS or button == target:
             continue
         if target == UNMAPPED or target in RETROPAD_BUTTONS:
@@ -179,21 +201,26 @@ def normalize_remap(remap: dict[str, str]) -> dict[str, str]:
     return result
 
 
-def remap_text(remap: dict[str, str]) -> str:
+def remap_text(remap: dict[str, str], console: str = "") -> str:
     """``game.rmp`` for ``remap`` (3DS button -> RetroPad button the game sees).
 
-    Empty when nothing changes. Buttons not listed keep their default.
+    Buttons not listed keep their default. The Circle Pad drives the D-Pad,
+    unless the remap makes it ``console``'s analog stick (:data:`CIRCLE_PAD`).
     """
     remap = normalize_remap(remap)
-    if not remap:
-        return ""
-    lines = []
+    text = []
     for button in RETROPAD_BUTTONS:
         if button in remap:
             target = remap[button]
             value = -1 if target == UNMAPPED else RETROPAD_BUTTONS.index(target)
-            lines.append(f'input_player1_btn_{button} = "{value}"')
-    return "\n".join(lines) + "\n"
+            text.append(f'input_player1_btn_{button} = "{value}"')
+    if remap.get(CIRCLE_PAD) == CIRCLE_PAD_STICK:
+        if console in ANALOG_DEVICES:
+            text.append(f'input_libretro_device_p1 = "{ANALOG_DEVICES[console]}"')
+        text.append(f'input_player1_analog_dpad_mode = "{_ANALOG_DPAD_OFF}"')
+    else:
+        text.append(f'input_player1_analog_dpad_mode = "{_ANALOG_DPAD_LEFT}"')
+    return "\n".join(text) + "\n"
 
 
 def parse_remap(entries: dict[str, str]) -> dict[str, str]:
@@ -207,6 +234,8 @@ def parse_remap(entries: dict[str, str]) -> dict[str, str]:
             remap[button] = UNMAPPED
         elif value < len(RETROPAD_BUTTONS):
             remap[button] = RETROPAD_BUTTONS[value]
+    if _parse_int(entries.get("input_player1_analog_dpad_mode")) == _ANALOG_DPAD_OFF:
+        remap[CIRCLE_PAD] = CIRCLE_PAD_STICK
     return normalize_remap(remap)
 
 

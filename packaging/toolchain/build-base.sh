@@ -87,6 +87,21 @@ checkout() {
     git -C "${dir}" clean -q -fdx
 }
 
+# Ships the core's licence with its base (MAME and FB Alpha forbid commercial
+# use: their terms travel with the binary). The first known name found wins.
+install_core_license() {
+    local core_dir="$1" dest="$2" name
+    for name in LICENSE LICENSE.md LICENSE.txt License.txt COPYING license.txt \
+        src/license.txt docs/license.txt svn-current/trunk/src/license.txt \
+        stella/license.txt lynx/license.txt; do
+        if [[ -f "${core_dir}/${name}" ]]; then
+            install -D -m 0644 "${core_dir}/${name}" "${dest}/LICENSE.core"
+            return
+        fi
+    done
+    log "[WARN]" "No licence file found in $(basename "${core_dir}")"
+}
+
 # Checks out a single file of a big repository (blobless partial clone).
 fetch_file() {
     local repo="$1" ref="$2" path="$3" dir="$4"
@@ -151,6 +166,7 @@ build_core() {
         retroarch_3ds.elf > /dev/null
 
     install -D -m 0644 "${ra_dir}/retroarch_3ds.elf" "${dest}/retroarch.elf"
+    install_core_license "${core_dir}" "${dest}"
     install -m 0644 "${ra_dir}/$(ra_make_var "${ra_dir}" "${CORE_NAME}" APP_ICON)" "${dest}/icon.png"
     install -m 0644 "${ra_dir}/$(ra_make_var "${ra_dir}" "${CORE_NAME}" APP_BANNER)" "${dest}/banner.png"
     install -m 0644 "${ra_dir}/$(ra_make_var "${ra_dir}" "${CORE_NAME}" APP_AUDIO)" "${dest}/audio.wav"

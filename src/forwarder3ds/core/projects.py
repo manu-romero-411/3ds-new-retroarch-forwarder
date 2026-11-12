@@ -27,6 +27,7 @@ from enum import Enum
 from pathlib import Path, PurePosixPath
 
 from forwarder3ds.core import paths
+from forwarder3ds.core.names import strip_tags
 from forwarder3ds.core.game_config import ScreenSettings, normalize_remap
 from forwarder3ds.core.logs import get_logger
 
@@ -121,8 +122,13 @@ class Project:  # pylint: disable=too-many-instance-attributes
 
     @property
     def title(self) -> str:
-        """What the library lists the project as."""
+        """What the library lists the project as (the full, No-Intro style name)."""
         return self.long_name or self.rom_path.stem
+
+    @property
+    def plain_title(self) -> str:
+        """The name without tags: for the banner and artwork searches."""
+        return self.short_name or strip_tags(self.title)
 
     @property
     def tag_year(self) -> str:

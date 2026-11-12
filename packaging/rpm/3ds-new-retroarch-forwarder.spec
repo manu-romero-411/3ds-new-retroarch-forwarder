@@ -22,6 +22,7 @@ Packager:       %{pkg_packager}
 Requires:       python3 >= 3.11
 Requires:       python3-requests
 Requires:       python3-pillow
+Requires:       python3-fonttools
 Requires:       python3-pyside6
 Recommends:     (ffmpeg-free or ffmpeg)
 Recommends:     qt6-qtwayland
