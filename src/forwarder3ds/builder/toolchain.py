@@ -49,6 +49,8 @@ BASE_ELF = "retroarch.elf"
 STANDALONE_ELF = "app.elf"
 STANDALONE_RSF = "app.rsf"
 STANDALONE_ROMFS = "romfs"
+#: Files a core ships for its system folder (blueMSX's machines), packed in every CIA.
+CORE_SYSTEM = "system"
 BASE_ENV = "base.env"
 BOTTOM_MENU_ASSET = "assets/bottom_menu.png"
 VERSIONS_FILE = "VERSIONS"
@@ -76,6 +78,8 @@ class Base:  # pylint: disable=too-many-instance-attributes
     #: A standalone emulator's own RSF and RomFS files (``None`` for RetroArch).
     rsf: Path | None = None
     romfs: Path | None = None
+    #: The files the core ships for its system folder (``None``: none).
+    system: Path | None = None
 
     @property
     def standalone(self) -> bool:
@@ -130,6 +134,7 @@ class Base:  # pylint: disable=too-many-instance-attributes
             info=info,
             rsf=rsf if rsf.is_file() else None,
             romfs=romfs if romfs.is_dir() else None,
+            system=system if (system := directory / CORE_SYSTEM).is_dir() else None,
         )
 
 

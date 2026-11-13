@@ -42,9 +42,10 @@ CIRCLE_PAD_STICK = "stick"
 #: Consoles whose games can take the Circle Pad as a stick, and the libretro
 #: controller that gives them one (the PlayStation's DualShock).
 ANALOG_DEVICES = {"psx": _DEVICE_DUALSHOCK}
-#: Consoles without the alternate boot mode: some PAL PlayStation games are
-#: taller than the 3DS screen, so they cannot be shown pixel perfect.
-NO_ALT_MODE = frozenset({"psx"})
+#: Consoles without the alternate boot mode: their picture (some PAL
+#: PlayStation games, the Vectrex's) is taller than the 3DS screen, so it
+#: cannot be shown pixel perfect.
+NO_ALT_MODE = frozenset({"psx", "vectrex"})
 
 
 def supports_alt_mode(console: str) -> bool:
@@ -282,6 +283,12 @@ RETROPAD_LABELS: dict[str, str] = {
 _GENESIS = {"b": "B", "a": "C", "y": "A", "x": "Y", "l": "X", "r": "Z", "select": "Mode"}
 _MASTER = {"b": "1", "a": "2", "start": "Pause"}
 _PCE = {"a": "I", "b": "II", "select": "Select", "start": "Run"}
+_NEOGEO_POCKET = {"b": "A", "a": "B", "start": "Option"}
+_WONDERSWAN = {
+    "a": "A", "b": "B", "start": "Start", "select": "Rotate",
+    "l": "Y Left", "r": "Y Right", "l2": "Y Down", "r2": "Y Up",
+}  # fmt: skip
+_MSX = {"a": "Trigger A", "b": "Trigger B"}
 _ARCADE = {
     "b": "Button 1", "a": "Button 2", "y": "Button 3", "x": "Button 4",
     "l": "Button 5", "r": "Button 6", "select": "Coin", "start": "Start",
@@ -294,7 +301,26 @@ CONSOLE_LABELS: dict[str, dict[str, str]] = {
         "l": "Left difficulty", "r": "Right difficulty",
     },
     "atari7800": {"b": "Fire 1", "a": "Fire 2", "select": "Select", "start": "Pause"},
+    "atari5200": {
+        "a": "Fire 1", "b": "Fire 2", "start": "Start", "select": "Pause",
+        "x": "#", "y": "*", "r": "0", "r2": "1", "l2": "3", "l": "Keypad",
+    },
     "lynx": {"a": "A", "b": "B", "l": "Option 1", "r": "Option 2", "start": "Pause"},
+    "ngp": _NEOGEO_POCKET,
+    "ngpc": _NEOGEO_POCKET,
+    "wswan": _WONDERSWAN,
+    "wswanc": _WONDERSWAN,
+    "colecovision": {
+        "b": "Left", "a": "Right", "y": "1", "x": "2", "l": "3", "r": "4",
+        "l2": "5", "r2": "6", "start": "*", "select": "#",
+    },
+    "msx1": _MSX,
+    "msx2": _MSX,
+    "vectrex": {"a": "1", "b": "2", "x": "3", "y": "4"},
+    "o2em": {
+        "b": "Action", "select": "Keyboard", "y": "Move keyboard",
+        "x": "0", "l": "1", "r": "2",
+    },
     "pokemini": {"a": "A", "b": "B", "r": "C", "l": "Shake", "select": "Power"},
     "gb": {"a": "A", "b": "B", "start": "Start", "select": "Select"},
     "gbc": {"a": "A", "b": "B", "start": "Start", "select": "Select"},

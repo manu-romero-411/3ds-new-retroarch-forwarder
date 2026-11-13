@@ -385,3 +385,28 @@ def test_no_alternate_mode_when_already_pixel_perfect(tmp_path: Path) -> None:
     assert alt_mode_applies("gb", None)
     assert alt_mode_applies("gb", ScreenSettings(mode=ScreenMode.FULL))
     assert not alt_mode_applies("psx", None)
+
+
+def test_base_system_files_packed_under_the_user_bios(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "share"))
+    base_dir = tmp_path / "bluemsx"
+    machine = base_dir / "system" / "bluemsx" / "Machines" / "MSX - C-BIOS"
+    machine.mkdir(parents=True)
+    (machine / "config.ini").write_text("cbios", encoding="utf-8")
+    (base_dir / "system" / "bluemsx" / "own.rom").write_bytes(b"base")
+    (base_dir / "retroarch.elf").write_bytes(b"\x7fELF")
+    (base_dir / "base.env").write_text("CORE_NAME=bluemsx\n", encoding="utf-8")
+    user = tmp_path / "share" / "3ds-forwarder" / "bios" / "bluemsx" / "bluemsx"
+    user.mkdir(parents=True)
+    (user / "own.rom").write_bytes(b"user")
+    rom = tmp_path / "Knightmare.rom"
+    rom.write_bytes(b"\0")
+    request = make_request(
+        rom=rom, console="msx1", long_name="Knightmare", output=tmp_path / "o.cia"
+    )
+    romfs = write_romfs(tmp_path / "scratch", request, Base.load(base_dir))
+    packed = romfs / "bios" / "bluemsx"
+    assert (packed / "Machines" / "MSX - C-BIOS" / "config.ini").is_file()
+    assert (packed / "own.rom").read_bytes() == b"user"  # the user's file wins

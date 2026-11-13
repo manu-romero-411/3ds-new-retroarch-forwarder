@@ -72,6 +72,7 @@ with its core option definitions (see `gambatte.env` for the format). Which cons
 |---|---|---|
 | stella2014 | atari2600 | |
 | prosystem | atari7800 | optional BIOS `7800 BIOS (U).rom` |
+| a5200 | atari5200 | needs `5200.rom` |
 | handy | lynx | needs `lynxboot.img` |
 | fceumm | nes, fds | FDS needs `disksys.rom` |
 | nestopia | nes, fds (alternative) | FDS needs `disksys.rom` |
@@ -79,6 +80,13 @@ with its core option definitions (see `gambatte.env` for the format). Which cons
 | gambatte | gb, gbc | |
 | gpsp | gba | needs `gba_bios.bin` |
 | pokemini | pokemini | optional BIOS `bios.min` |
+| race | ngp, ngpc | |
+| mednafen_ngp | ngp, ngpc (alternative) | slower than RACE |
+| mednafen_wswan | wswan, wswanc | |
+| gearcoleco | colecovision | needs `colecovision.rom` |
+| bluemsx | msx1, msx2 | cartridges; ships its machines and the free C-BIOS (`system/` in the base): real BIOS go in `bios/bluemsx/bluemsx/Machines/` |
+| vecx | vectrex | |
+| o2em | o2em | needs `o2rom.bin` |
 | genesis_plus_gx | sg1000, mastersystem, megadrive, segacd, gamegear | Mega-CD needs `bios_CD_U.bin` / `_E` / `_J` |
 | picodrive | sega32x; alternative for the Sega consoles | Mega-CD as above |
 | mednafen_pce_fast | pcengine, pcenginecd | PC Engine CD needs `syscard3.pce` |

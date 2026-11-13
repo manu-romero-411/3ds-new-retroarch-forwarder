@@ -14,6 +14,8 @@
 #   OUT_DIR/bases/<CORE>/{icon,banner}.png, audio.wav   RetroArch's defaults
 #   OUT_DIR/bases/<CORE>/assets/bottom_menu.png         touch screen menu
 #   OUT_DIR/bases/<CORE>/core_options.h  the core's option definitions
+#   OUT_DIR/bases/<CORE>/system/         files the core ships for its system
+#                                        folder (CORE_SYSTEM_PATHS), if any
 # and records the revision in OUT_DIR/VERSIONS. Sources are checked out in
 # build/base/ (WORK_DIR overrides it). With DEVKITARM set (inside
 # devkitpro/devkitarm) it builds directly; otherwise it runs itself in that
@@ -102,6 +104,25 @@ install_core_license() {
     log "[WARN]" "No licence file found in $(basename "${core_dir}")"
 }
 
+# Copies the ":"-separated PATHS (relative to ROOT) into DEST, keeping their
+# relative paths: the files a core needs in its system folder. DEST is
+# emptied first, and removed when there is nothing to copy.
+install_core_system() {
+    local root="$1" paths="$2" dest="$3" path
+    local -a list
+    rm -rf "${dest}"
+    [[ -n "${paths}" ]] || return 0
+    IFS=: read -ra list <<< "${paths}"
+    for path in "${list[@]}"; do
+        if [[ ! -e "${root}/${path}" ]]; then
+            log "[WARN]" "Missing system path ${path}"
+            continue
+        fi
+        mkdir -p "${dest}/$(dirname "${path}")"
+        cp -R "${root}/${path}" "${dest}/${path}"
+    done
+}
+
 # Checks out a single file of a big repository (blobless partial clone).
 fetch_file() {
     local repo="$1" ref="$2" path="$3" dir="$4"
@@ -139,7 +160,7 @@ ra_make_var() {
 build_core() {
     local work="$1" recipe="$2" out_dir="$3" ra_dir="$1/RetroArch"
     local CORE_NAME CORE_REPO CORE_REF CORE_SUBDIR CORE_MAKEFILE CORE_LIB CORE_CFLAGS=""
-    local CORE_OPTIONS="" CORE_MAKE_ARGS=""
+    local CORE_OPTIONS="" CORE_MAKE_ARGS="" CORE_SYSTEM_ROOT="" CORE_SYSTEM_PATHS=""
     # shellcheck source=retroarch/cores/gambatte.env
     source "${recipe}"
     local core_dir="${work}/cores/${CORE_NAME}" dest="${out_dir}/bases/${CORE_NAME}"
@@ -178,6 +199,7 @@ build_core() {
     else
         rm -f "${dest}/core_options.h"
     fi
+    install_core_system "${core_dir}/${CORE_SYSTEM_ROOT}" "${CORE_SYSTEM_PATHS}" "${dest}/system"
     {
         echo "CORE_NAME=${CORE_NAME}"
         echo "CORE_REF=${CORE_REF}"
@@ -302,6 +324,24 @@ emulator_packages() {
     done | tr ' ' '\n' | sort -u | tr '\n' ' '
 }
 
+# Shell code (run in the container) installing devkitPro packages: only the
+# missing ones, and retrying, as pkg.devkitpro.org now and then answers 403
+# (it rate-limits shared CI addresses).
+dkp_install_command() {
+    local packages="$1"
+    cat << EOF
+missing="\$(for p in ${packages}; do dkp-pacman -Q "\$p" > /dev/null 2>&1 || echo "\$p"; done)"
+if [ -n "\$missing" ]; then
+    for attempt in 1 2 3 4 5 6; do
+        dkp-pacman -Sy --needed --noconfirm \$missing > /dev/null && break
+        [ "\$attempt" = 6 ] && { echo "devkitPro packages unavailable: \$missing" >&2; exit 1; }
+        echo "pkg.devkitpro.org failed, retrying in \$((attempt * 20)) s" >&2
+        sleep \$((attempt * 20))
+    done
+fi
+EOF
+}
+
 build_in_container() {
     local out_dir="$1" engine z packages build
     shift
@@ -321,7 +361,7 @@ build_in_container() {
         build="setpriv --reuid=$(id -u) --regid=$(id -g) --clear-groups ${build}"
     fi
     if [[ -n "${packages// /}" ]]; then
-        build="dkp-pacman -Sy --needed --noconfirm ${packages} > /dev/null && ${build}"
+        build="$(dkp_install_command "${packages}") && ${build}"
     fi
     log "[INFO]" "Building bases ($*) in ${DEVKITARM_IMAGE} (${engine})"
     "${run[@]}" run --rm "${user_args[@]}" -e HOME=/tmp -e RA_LEAN="${RA_LEAN:-1}" \

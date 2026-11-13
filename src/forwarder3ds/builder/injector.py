@@ -407,19 +407,26 @@ def _write_bios(romfs: Path, directory: Path, base: Base) -> None:
 
     RetroArch reads them as if they were in the game's system folder
     (``<data_dir>/system``, patch 0006), unless that folder has its own copy.
-    Standalone emulators take none.
+    The files the base ships for that folder (blueMSX's machines) go first,
+    the user's BIOS over them. Standalone emulators take none.
     """
+    if base.system is not None:
+        _copy_tree(base.system, bios_files(base.system), romfs / BIOS_DIR_NAME)
     files = bios_files(directory)
     if not files:
         return
     if base.standalone:
         _log.warning("%s is not RetroArch: its BIOS folder is not packed", base.core)
         return
-    for name in files:
-        target = romfs / BIOS_DIR_NAME / name
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(directory / name, target)
+    _copy_tree(directory, files, romfs / BIOS_DIR_NAME)
     _log.info("BIOS packed from %s: %s", directory, ", ".join(map(str, files)))
+
+
+def _copy_tree(source: Path, names: list[Path], target: Path) -> None:
+    """Copy ``names`` (relative to ``source``) under ``target``."""
+    for name in names:
+        (target / name).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source / name, target / name)
 
 
 def _write_bottom_picture(target: Path, request: GameRequest, base: Base) -> None:

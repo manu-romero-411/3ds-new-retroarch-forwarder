@@ -34,10 +34,12 @@ RetroArch installed and never touches `sdmc:/retroarch`.
   later, without reinstalling.
 
   `<console>` is Batocera's folder name (`gb`, `snes`, `megadrive`, `psx`...).
-- **Consoles**: Atari 2600, 7800 and Lynx, NES and Famicom Disk System,
-  SNES, Game Boy, Game Boy Color, Game Boy Advance, Pokémon Mini, SG-1000,
-  Master System, Mega Drive, 32X, Mega-CD, Game Gear, PC Engine and PC
-  Engine CD, PlayStation (one-disc games: `.chd` or `.pbp`) and arcade
+- **Consoles**: Atari 2600, 5200, 7800 and Lynx, NES and Famicom Disk
+  System, SNES, Game Boy, Game Boy Color, Game Boy Advance, Pokémon Mini,
+  Neo Geo Pocket and Pocket Color, WonderSwan and WonderSwan Color,
+  ColecoVision, MSX and MSX2 (cartridges), SG-1000, Master System, Mega
+  Drive, 32X, Mega-CD, Game Gear, PC Engine and PC Engine CD, Vectrex,
+  Odyssey2, PlayStation (one-disc games: `.chd` or `.pbp`) and arcade
   (`mame`: MAME 2003 / 2000; `fbneo`: FinalBurn Neo's Neo Geo and CPS-1/2
   builds, FB Alpha 2012). The cores and the BIOS each needs are listed in
   [`retroarch/`](retroarch/README.md). An arcade game is its romset `.zip`,
