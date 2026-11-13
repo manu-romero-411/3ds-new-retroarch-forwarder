@@ -1,0 +1,117 @@
+ctr: alternate boot mode, held START or SELECT
+
+With "alt_mode = true" in the manifest, holding START or SELECT while the
+game boots shows it pixel perfect (square pixels, integer scale, no
+filtering) inside romfs:/bezel_alt.png, or no bezel when there is none.
+The configuration is not saved on exit in that mode, so the game's own
+settings and bezel stay as they were.
+
+--- a/frontend/drivers/platform_ctr.c
++++ b/frontend/drivers/platform_ctr.c
+@@ -55,6 +55,7 @@
+ #include "../../configuration.h"
+ #include "../../command.h"
+ #include "../../verbosity.h"
++#include "../../gfx/video_driver.h"
+ 
+ #include "ctr/ctr_debug.h"
+ #include "ctr/exec-3dsx/exec_3dsx.h"
+@@ -121,9 +122,16 @@
+  *   game.rmp          seeds the game's control remap, optional
+  *   bottom_menu.png   touch screen menu asset, optional
+  *   bezel.png         top screen bezel, optional (+ bezel.cfg, its overlay)
++ *   bezel_alt.png     the alternate mode's bezel, optional (+ bezel_alt.cfg)
+  *
+  * A bezel.png in data_dir replaces the RomFS one; its overlay file
+  * (data_dir/bezel.cfg) is written next to it when missing.
++ *
++ * Alternate mode: with "alt_mode = true" in the manifest, holding START or
++ * SELECT while the game boots shows it pixel perfect (square pixels at an
++ * integer scale, no filtering) inside bezel_alt.png, or no bezel. Those
++ * settings only last for that session: the configuration is not saved on
++ * exit, so the game's own settings and bezel are never touched.
+  */
+ #define CTR_INJECTED_ROOT     "romfs:/"
+ #define CTR_INJECTED_MANIFEST CTR_INJECTED_ROOT "manifest.cfg"
+@@ -137,9 +145,12 @@
+    "overlay0_overlay = \"" CTR_BEZEL_IMAGE "\"\n" \
+    "overlay0_full_screen = true\n" \
+    "overlay0_descs = 0\n"
++#define CTR_ALT_BEZEL_IMAGE   CTR_INJECTED_ROOT "bezel_alt.png"
++#define CTR_ALT_BEZEL_OVERLAY CTR_INJECTED_ROOT "bezel_alt.cfg"
+ 
+ static bool ctr_romfs_mounted = false;
+ static bool ctr_injected      = false;
++static bool ctr_injected_alt  = false;
+ static char ctr_injected_content[PATH_MAX_LENGTH];
+ static char ctr_injected_data_dir[PATH_MAX_LENGTH];
+ 
+@@ -415,6 +426,7 @@
+    char content[PATH_MAX_LENGTH];
+    char data_dir[PATH_MAX_LENGTH];
+    char system_dir[PATH_MAX_LENGTH];
++   bool alt_mode           = false;
+    config_file_t *manifest = NULL;
+ 
+    if (R_FAILED(romfsInit()))
+@@ -431,8 +443,16 @@
+    config_get_array(manifest, "content",    content,    sizeof(content));
+    config_get_array(manifest, "data_dir",   data_dir,   sizeof(data_dir));
+    config_get_array(manifest, "system_dir", system_dir, sizeof(system_dir));
++   config_get_bool(manifest,  "alt_mode",   &alt_mode);
+    config_file_free(manifest);
+ 
++   /* libctru's start-up code has the HID service running already. */
++   if (alt_mode)
++   {
++      hidScanInput();
++      ctr_injected_alt = (hidKeysHeld() & (KEY_START | KEY_SELECT)) != 0;
++   }
++
+    if (string_is_empty(content) || string_is_empty(data_dir))
+       return false;
+ 
+@@ -498,6 +518,12 @@
+    char image[PATH_MAX_LENGTH];
+ 
+    s[0] = '\0';
++   if (ctr_injected_alt)
++   {
++      if (path_is_valid(CTR_ALT_BEZEL_IMAGE))
++         strlcpy(s, CTR_ALT_BEZEL_OVERLAY, len);
++      return;
++   }
+    fill_pathname_join(image, ctr_injected_data_dir, CTR_BEZEL_IMAGE, sizeof(image));
+    if (path_is_valid(image))
+    {
+@@ -510,6 +536,20 @@
+       strlcpy(s, CTR_INJECTED_ROOT CTR_BEZEL_OVERLAY, len);
+ }
+ 
++/* The alternate mode's picture: pixel perfect, for this session only. */
++static void ctr_injected_apply_alt(settings_t *settings)
++{
++   configuration_set_bool(settings,
++         settings->bools.config_save_on_exit, false);
++   configuration_set_bool(settings,
++         settings->bools.video_scale_integer, true);
++   configuration_set_bool(settings, settings->bools.video_smooth, false);
++   configuration_set_uint(settings,
++         settings->uints.video_aspect_ratio_idx, ASPECT_RATIO_SQUARE);
++   video_driver_set_filtering(1, false, false);
++   command_event(CMD_EVENT_VIDEO_SET_ASPECT_RATIO, NULL);
++}
++
+ /* Runs once the content is loaded (settings and video are up): shows the
+  * game's bezel as a full screen overlay, or turns overlays off. */
+ static void frontend_ctr_process_args(int *argc, char *argv[])
+@@ -527,6 +567,9 @@
+       configuration_set_string(settings,
+             settings->paths.directory_bottom_assets, CTR_INJECTED_ROOT);
+ 
++   if (ctr_injected_alt)
++      ctr_injected_apply_alt(settings);
++
+    ctr_injected_bezel_overlay(overlay, sizeof(overlay));
+    if (string_is_empty(overlay))
+    {

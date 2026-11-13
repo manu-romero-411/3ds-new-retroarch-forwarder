@@ -95,7 +95,8 @@ def test_pick_game() -> None:
 def test_build_and_read_back(rom: Path, tmp_path: Path) -> None:
     """End to end: build a CIA, read it back, rebuild it keeping its Title ID."""
     out = tmp_path / "game.cia"
-    args = [*build_args(rom), "--jingle", "smw_coin", "--screen", "custom:360x240", "--smooth"]
+    args = [*build_args(rom), "--jingle", "smw_coin", "--screen", "custom:360x240", "--smooth",
+            "--alt-mode"]  # fmt: skip
     assert main([*args, "-o", str(out)]) == 0
     loaded = read_game_cia(out)
     assert loaded.screen is not None and loaded.screen.smooth
@@ -107,6 +108,7 @@ def test_build_and_read_back(rom: Path, tmp_path: Path) -> None:
         "Game",
     )
     assert loaded.rom_name == rom.name
+    assert loaded.alt_mode and loaded.alt_bezel_png is None
     assert loaded.extract_rom(tmp_path / "out").read_bytes() == rom.read_bytes()
     assert loaded.icon_png and loaded.banner_png and loaded.audio_wav
     assert main(["build", "--from-cia", str(out), "--short-name", "G"]) == 0
@@ -114,3 +116,4 @@ def test_build_and_read_back(rom: Path, tmp_path: Path) -> None:
     assert rebuilt.unique_id == loaded.unique_id
     assert rebuilt.short_name == "G"
     assert rebuilt.screen == loaded.screen
+    assert rebuilt.alt_mode

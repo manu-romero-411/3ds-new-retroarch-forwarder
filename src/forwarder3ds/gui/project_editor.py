@@ -51,7 +51,7 @@ from forwarder3ds.artwork.compositor import compose_banner_png_bytes
 from forwarder3ds.artwork.libretro import ThumbnailKind, fetch_thumbnail
 from forwarder3ds.artwork.steamgriddb import AssetKind
 from forwarder3ds.core.catalog import JINGLE_RULES, list_jingles, validate_jingle
-from forwarder3ds.core.game_config import ScreenMode
+from forwarder3ds.core.game_config import ScreenMode, supports_alt_mode
 from forwarder3ds.core.logs import get_logger
 from forwarder3ds.core.names import database_title, save_folder_name, strip_tags, suggest_title
 from forwarder3ds.core.projects import Asset, BannerStyle, Project
@@ -749,6 +749,12 @@ class ProjectEditor(QScrollArea):  # pylint: disable=too-many-instance-attribute
             parts.append(self.tr("bezel"))
         if project.bottom_screen:
             parts.append(self.tr("own touch screen"))
+        if (
+            project.alt_mode
+            and supports_alt_mode(project.console)
+            and not self._context.is_standalone(project.core)
+        ):
+            parts.append(self.tr("alternate mode"))
         if project.remap:
             parts.append(self.tr("custom buttons"))
         if project.core_options:
@@ -779,6 +785,7 @@ class ProjectEditor(QScrollArea):  # pylint: disable=too-many-instance-attribute
             load_screenshot=self._screenshot_loader(),
         )
         bezel = project.asset(Asset.BEZEL)
+        alt_bezel = project.asset(Asset.ALT_BEZEL)
         touch_image = project.asset(Asset.BOTTOM_SCREEN)
         current = InjectionOptions(
             screen=project.screen,
@@ -787,6 +794,8 @@ class ProjectEditor(QScrollArea):  # pylint: disable=too-many-instance-attribute
             bezel=bezel,
             bottom_screen=project.bottom_screen,
             bottom_image=touch_image,
+            alt_mode=project.alt_mode,
+            alt_bezel=alt_bezel,
         )
         edited = InjectionOptionsDialog.edit(self, game, current)
         if edited is None:
@@ -795,8 +804,11 @@ class ProjectEditor(QScrollArea):  # pylint: disable=too-many-instance-attribute
         project.core_options = edited.core_options
         project.remap = edited.remap
         project.bottom_screen = edited.bottom_screen
+        project.alt_mode = edited.alt_mode
         if edited.bezel != bezel:
             self._set_asset(Asset.BEZEL, edited.bezel)
+        if edited.alt_bezel != alt_bezel:
+            self._set_asset(Asset.ALT_BEZEL, edited.alt_bezel)
         if edited.bottom_image != touch_image:
             self._set_asset(Asset.BOTTOM_SCREEN, edited.bottom_image)
         self._show_options_summary()

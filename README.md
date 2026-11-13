@@ -45,6 +45,11 @@ RetroArch installed and never touches `sdmc:/retroarch`.
 - An optional **bezel** over the top screen (`--bezel`, 400x240 with a
   transparent window: a 4:3 game is the middle 320x240), replaceable per
   game by dropping a `bezel.png` in its save folder.
+- An optional **alternate mode** (RetroArch only, not for the PlayStation):
+  holding START or SELECT while the game boots shows it pixel perfect,
+  without filtering, inside a bezel of its own (a handheld's frame, say;
+  `--alt-bezel`, or `--alt-mode` for none). Nothing is saved in that
+  session, so the game's usual settings and bezel are never touched.
 - A **Virtual Console style touch screen** while the game runs ("Tap the
   Touch Screen to go to the RetroArch menu." and "⌂: Return to HOME Menu"),
   in English, Japanese, French, German, Italian, Spanish, Dutch, Portuguese
@@ -169,6 +174,7 @@ the toolchain (with overrides) and your own jingle and logo folders.
 3ds-forwarder build ... --core snes9x2005 --folder "SMW" --long-name "Super Mario World"
 3ds-forwarder build ... --icon icon.png --hero hero.png --logo logo.png --platform-logo snes
 3ds-forwarder build ... --bezel snes-frame.png   # top screen bezel
+3ds-forwarder build ... --alt-bezel gb-frame.png  # START/SELECT at boot: pixel perfect in it
 3ds-forwarder build ... --screen custom:360x240 --smooth   # or pixel_perfect, recommended, full
 3ds-forwarder build --rom game.gb --identify    # names and publisher from the libretro database
 3ds-forwarder identify game.gb                  # what the libretro database says about a ROM

@@ -55,6 +55,11 @@ Written against the RetroArch release in `RETROARCH_REF`; bump both together.
   device laying the SD card folder over the CIA's: files are read from the
   SD card when they are there, else from the CIA, and written to the SD
   card. Nothing is copied.
+- `0007-ctr-alternate-boot-mode.patch`: with `alt_mode = "true"` in the
+  manifest, holding START or SELECT while the game boots shows it pixel
+  perfect (square pixels, integer scale, no filtering) inside
+  `romfs:/bezel_alt.png`, or no bezel. The configuration is not saved on
+  exit in that session, so the game's settings and bezel stay as they were.
 
 ## Core recipes
 

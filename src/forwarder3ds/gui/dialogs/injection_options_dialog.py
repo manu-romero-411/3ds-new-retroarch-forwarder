@@ -10,6 +10,9 @@ Like NSUI's *Injection method options*, with live previews of both screens:
   the emulator's own) and the top screen bezel. Both apply to every
   emulator: RetroArch draws the bezel over the game, a standalone emulator
   behind it.
+* **Alternate mode** (RetroArch only, not for the PlayStation): holding
+  START or SELECT while the game boots shows it pixel perfect inside a
+  bezel of its own, for that session only.
 * **RetroArch**: the button mapping and the initial core options.
 
 Everything here seeds the game's save folder the first time it boots; from
@@ -66,7 +69,13 @@ from forwarder3ds.artwork.screen_preview import (
 )
 from forwarder3ds.builder.injector import bios_files
 from forwarder3ds.core.core_options import CoreOptions
-from forwarder3ds.core.game_config import SCREEN_HEIGHT, SCREEN_WIDTH, ScreenMode, ScreenSettings
+from forwarder3ds.core.game_config import (
+    SCREEN_HEIGHT,
+    SCREEN_WIDTH,
+    ScreenMode,
+    ScreenSettings,
+    supports_alt_mode,
+)
 from forwarder3ds.core.paths import bios_dir
 from forwarder3ds.gui.dialogs.button_map_dialog import ButtonMapDialog
 from forwarder3ds.gui.dialogs.core_options_dialog import CoreOptionsDialog
@@ -92,6 +101,9 @@ class InjectionOptions:
     bottom_screen: str = CHOICE_DEFAULT
     #: The picture for :data:`CHOICE_IMAGE`.
     bottom_image: Path | None = None
+    #: The alternate boot mode (START or SELECT held) and its bezel.
+    alt_mode: bool = False
+    alt_bezel: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -149,6 +161,12 @@ class InjectionOptionsDialog(QDialog):  # pylint: disable=too-many-instance-attr
         self._bezel = PathPicker(
             select_dir=False, placeholder=self.tr("None"), file_filter=_IMAGE_FILTER
         )
+        self._alt_mode = QCheckBox(self.tr("Hold START or SELECT at boot for pixel perfect"))
+        self._alt_bezel = PathPicker(
+            select_dir=False, placeholder=self.tr("None"), file_filter=_IMAGE_FILTER
+        )
+        #: The top preview shows the alternate mode (after editing it).
+        self._preview_alt = False
         self._touch = QComboBox()
         self._fill_touch_choices()
         self._touch_image = PathPicker(
@@ -176,7 +194,10 @@ class InjectionOptionsDialog(QDialog):  # pylint: disable=too-many-instance-attr
         if self._game.standalone:
             layout.addWidget(self._standalone_note())
         columns = QHBoxLayout()
-        columns.addWidget(self._build_screen_group())
+        left = QVBoxLayout()
+        left.addWidget(self._build_screen_group())
+        left.addWidget(self._build_alt_group())
+        columns.addLayout(left)
         right = QVBoxLayout()
         right.addWidget(self._build_screens_group())
         right.addWidget(self._build_retroarch_group())
@@ -215,15 +236,20 @@ class InjectionOptionsDialog(QDialog):  # pylint: disable=too-many-instance-attr
         index = self._touch.findData(options.bottom_screen)
         self._touch.setCurrentIndex(max(index, 0))
         self._touch_image.set_text(str(options.bottom_image) if options.bottom_image else "")
+        self._alt_mode.setChecked(options.alt_mode)
+        self._alt_bezel.set_text(str(options.alt_bezel) if options.alt_bezel else "")
 
     def _connect_previews(self) -> None:
         for radio in self._radios.values():
-            radio.toggled.connect(self._refresh_top)
+            radio.toggled.connect(self._show_normal)
         self._radios[ScreenMode.CUSTOM].toggled.connect(self._update_custom)
-        self._width.valueChanged.connect(self._refresh_top)
-        self._height.valueChanged.connect(self._refresh_top)
-        self._smooth.toggled.connect(self._refresh_top)
-        self._bezel.edit.textChanged.connect(self._refresh_top)
+        self._width.valueChanged.connect(self._show_normal)
+        self._height.valueChanged.connect(self._show_normal)
+        self._smooth.toggled.connect(self._show_normal)
+        self._bezel.edit.textChanged.connect(self._show_normal)
+        self._alt_mode.toggled.connect(self._show_alt)
+        self._alt_mode.toggled.connect(self._alt_bezel.setEnabled)
+        self._alt_bezel.edit.textChanged.connect(self._show_alt)
         self._touch.currentIndexChanged.connect(self._refresh_bottom)
         self._touch_image.edit.textChanged.connect(self._on_touch_image)
 
@@ -295,6 +321,34 @@ class InjectionOptionsDialog(QDialog):  # pylint: disable=too-many-instance-attr
         if self._game.standalone:
             modes.setEnabled(False)
             self._smooth.setEnabled(False)
+        return group
+
+    def _build_alt_group(self) -> QGroupBox:
+        group = QGroupBox(self.tr("Alternate mode"))
+        form = QFormLayout(group)
+        form.addRow(self._alt_mode)
+        form.addRow(self.tr("Bezel:"), self._alt_bezel)
+        hint = QLabel(
+            self.tr(
+                "Shows the game pixel perfect, without filtering, inside this picture "
+                "(a handheld's frame, say). Nothing is saved in that mode: the game's own "
+                "settings and bezel stay as they are."
+            )
+        )
+        hint.setWordWrap(True)
+        hint.setForegroundRole(QPalette.ColorRole.PlaceholderText)
+        form.addRow("", hint)
+        self._alt_bezel.setEnabled(self._alt_mode.isChecked())
+        if self._game.standalone:
+            group.setEnabled(False)
+            group.setToolTip(self.tr("RetroArch only."))
+        elif not supports_alt_mode(self._game.console):
+            group.setEnabled(False)
+            group.setToolTip(
+                self.tr("Not for {console}: some games are larger than the 3DS screen.").format(
+                    console=self._game.console_name
+                )
+            )
         return group
 
     def _build_screens_group(self) -> QGroupBox:
@@ -386,12 +440,25 @@ class InjectionOptionsDialog(QDialog):  # pylint: disable=too-many-instance-attr
             smooth=self._smooth.isChecked() and not self._game.standalone,
         )
 
+    def _show_normal(self) -> None:
+        self._preview_alt = False
+        self._refresh_top()
+
+    def _show_alt(self) -> None:
+        self._preview_alt = self._alt_mode.isChecked()
+        self._refresh_top()
+
     def _refresh_top(self) -> None:
+        if self._preview_alt:
+            screen = ScreenSettings(mode=ScreenMode.PIXEL_PERFECT, smooth=False)
+            bezel = self._image(self._alt_bezel.text())
+        else:
+            screen, bezel = self._screen(), self._image(self._bezel.text())
         image = render_top_preview(
             console=self._game.console,
-            screen=self._screen(),
+            screen=screen,
             screenshot=self._screenshot,
-            bezel=self._image(self._bezel.text()),
+            bezel=bezel,
             bezel_behind=self._game.standalone,
         )
         self._top_preview.setPixmap(_pixmap(to_png(image)))
@@ -465,6 +532,7 @@ class InjectionOptionsDialog(QDialog):  # pylint: disable=too-many-instance-attr
         mode = next(mode for mode, radio in self._radios.items() if radio.isChecked())
         bezel = self._bezel.text()
         touch_image = self._touch_image.text()
+        alt_bezel = self._alt_bezel.text()
         return InjectionOptions(
             screen=ScreenSettings(
                 mode=mode,
@@ -477,6 +545,8 @@ class InjectionOptionsDialog(QDialog):  # pylint: disable=too-many-instance-attr
             bezel=Path(bezel) if bezel else None,
             bottom_screen=self._touch.currentData() or CHOICE_DEFAULT,
             bottom_image=Path(touch_image) if touch_image else None,
+            alt_mode=self._alt_mode.isChecked(),
+            alt_bezel=Path(alt_bezel) if alt_bezel else None,
         )
 
     @staticmethod

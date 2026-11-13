@@ -42,6 +42,14 @@ CIRCLE_PAD_STICK = "stick"
 #: Consoles whose games can take the Circle Pad as a stick, and the libretro
 #: controller that gives them one (the PlayStation's DualShock).
 ANALOG_DEVICES = {"psx": _DEVICE_DUALSHOCK}
+#: Consoles without the alternate boot mode: some PAL PlayStation games are
+#: taller than the 3DS screen, so they cannot be shown pixel perfect.
+NO_ALT_MODE = frozenset({"psx"})
+
+
+def supports_alt_mode(console: str) -> bool:
+    """Whether games of ``console`` can have the alternate boot mode."""
+    return console not in NO_ALT_MODE
 
 
 class ScreenMode(str, Enum):

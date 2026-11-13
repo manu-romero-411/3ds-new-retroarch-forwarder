@@ -302,8 +302,9 @@ def test_standalone_core_validates() -> None:
 
 
 def test_bios_packed_from_the_user_folder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
-    bios = tmp_path / "data" / "3ds-forwarder" / "bios" / "fbneo_neogeo"
+    # under a hidden folder, as ~/.local is
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / ".local" / "share"))
+    bios = tmp_path / ".local" / "share" / "3ds-forwarder" / "bios" / "fbneo_neogeo"
     (bios / "fbneo").mkdir(parents=True)
     (bios / "fbneo" / "neogeo.zip").write_bytes(b"PK")
     (bios / ".DS_Store").write_bytes(b"junk")
@@ -322,3 +323,49 @@ def test_bios_packed_from_the_user_folder(tmp_path: Path, monkeypatch: pytest.Mo
     # the game's own system folder, where RetroArch copies them on boot
     manifest = (romfs / "manifest.cfg").read_text(encoding="utf-8")
     assert 'system_dir = "sdmc:/saves/fbneo/Metal Slug/system"' in manifest
+
+
+def test_alternate_boot_mode(tmp_path: Path) -> None:
+    rom = tmp_path / "Tetris.gb"
+    rom.write_bytes(b"\0")
+    frame = tmp_path / "frame.png"
+    Image.new("RGBA", (40, 24), (0, 0, 255, 255)).save(frame)
+    base = Base("gambatte", tmp_path / "x.elf", "64MB", "Legacy", False, None, {})
+    request = make_request(
+        rom=rom, long_name="Tetris", output=tmp_path / "t.cia", alt_mode=True, alt_bezel=frame
+    )
+    romfs = write_romfs(tmp_path / "gb", request, base)
+    assert 'alt_mode = "true"' in (romfs / "manifest.cfg").read_text(encoding="utf-8")
+    with Image.open(romfs / "bezel_alt.png") as picture:
+        assert picture.size == (400, 240)
+    assert 'overlay0_overlay = "bezel_alt.png"' in (romfs / "bezel_alt.cfg").read_text(
+        encoding="utf-8"
+    )
+    assert not (romfs / "bezel.png").exists()  # the normal bezel is separate
+
+    # no alternate mode on the PlayStation
+    disc = tmp_path / "Game.chd"
+    disc.write_bytes(b"\0")
+    request = make_request(
+        rom=disc, console="psx", long_name="Game", output=tmp_path / "p.cia",
+        alt_mode=True, alt_bezel=frame,
+    )  # fmt: skip
+    base = Base("pcsx_rearmed", tmp_path / "x.elf", "64MB", "Legacy", False, None, {})
+    romfs = write_romfs(tmp_path / "psx", request, base)
+    assert "alt_mode" not in (romfs / "manifest.cfg").read_text(encoding="utf-8")
+    assert not (romfs / "bezel_alt.png").exists()
+
+
+def test_project_keeps_the_alternate_mode(tmp_path: Path) -> None:
+    rom = tmp_path / "Tetris.gb"
+    rom.write_bytes(b"\0")
+    store = ProjectStore(tmp_path / "projects")
+    project = store.create(rom, "gb", core="gambatte", long_name="Tetris", alt_mode=True)
+    frame = tmp_path / "frame.png"
+    Image.new("RGBA", (4, 4)).save(frame)
+    store.set_asset(project, Asset.ALT_BEZEL, frame)
+    (listed,) = store.list()
+    assert listed.alt_mode
+    assert listed.asset(Asset.BEZEL) is None  # bezel.* does not match alt_bezel.png
+    request = request_from_project(listed, tmp_path / "o.cia")
+    assert request.alt_mode and request.alt_bezel == listed.asset(Asset.ALT_BEZEL)

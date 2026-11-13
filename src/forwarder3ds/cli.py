@@ -20,6 +20,7 @@ import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from forwarder3ds import __version__
 from forwarder3ds.artwork.banner_card import CardStyle, render_card_to_file
@@ -52,7 +53,7 @@ from forwarder3ds.core.systems import System
 from forwarder3ds.core.fonts import font_path
 from forwarder3ds.core.settings import Settings, load_settings, masked
 from forwarder3ds.core.title_id import unique_id_to_title_id
-from forwarder3ds.ctr.cia import CiaReadError, LoadedGame, read_game_cia
+from forwarder3ds.ctr.cia import CiaReadError, LoadedAssets, LoadedGame, read_game_cia
 
 _log = get_logger("cli")
 
@@ -268,7 +269,22 @@ def _request_from_args(args: argparse.Namespace, settings: Settings, scratch: Pa
         replace_existing_id=loaded is not None and unique_id == loaded.unique_id,
         bottom_screen=_bottom_screen(args, settings),
         bottom_image=None if args.no_touch_screen else args.touch_image,
+        **_alt_mode(args, loaded, assets),
     )
+
+
+def _alt_mode(
+    args: argparse.Namespace, loaded: LoadedGame | None, assets: LoadedAssets | None
+) -> dict[str, Any]:
+    """The alternate boot mode: the options', else the loaded CIA's."""
+    if args.no_alt_mode:
+        return {"alt_mode": False, "alt_bezel": None}
+    if args.alt_bezel is not None or args.alt_mode:
+        return {"alt_mode": True, "alt_bezel": args.alt_bezel}
+    return {
+        "alt_mode": loaded is not None and loaded.alt_mode,
+        "alt_bezel": assets.alt_bezel if assets else None,
+    }
 
 
 def _bottom_screen(args: argparse.Namespace, settings: Settings) -> BottomScreenStyle | None:
@@ -276,6 +292,12 @@ def _bottom_screen(args: argparse.Namespace, settings: Settings) -> BottomScreen
     if args.no_touch_screen or not touch.enabled:
         return None
     return BottomScreenStyle(args.touch_language or touch.language, font_path(touch.font_choice))
+
+
+def _describe_alt(loaded: LoadedGame) -> str:
+    if not loaded.alt_mode:
+        return "no"
+    return "pixel perfect" + (", own bezel" if loaded.alt_bezel_png else "")
 
 
 def _describe_screen(screen: ScreenSettings | None) -> str:
@@ -356,6 +378,7 @@ def _cmd_inspect(args: argparse.Namespace, _settings: Settings) -> int:
         ("Saves", f"sdmc:/saves/{loaded.console}/{loaded.folder}"),
         ("ROM", f"{loaded.rom_name} ({loaded.rom_size} bytes)"),
         ("Bezel", "yes" if loaded.bezel_png else "no"),
+        ("Alt. mode", _describe_alt(loaded)),
         ("Screen", _describe_screen(loaded.screen)),
         ("Core options", f"{len(loaded.core_options)} set" if loaded.core_options else "defaults"),
         ("Controls", ", ".join(f"{k}->{v}" for k, v in loaded.remap.items()) or "default"),
@@ -377,7 +400,9 @@ def _cmd_inspect(args: argparse.Namespace, _settings: Settings) -> int:
         except CiaReadError as exc:
             _log.error("%s", exc)
             return 1
-        for path in (written.icon, written.banner, written.audio, written.bezel, rom):
+        for path in (
+            written.icon, written.banner, written.audio, written.bezel, written.alt_bezel, rom
+        ):  # fmt: skip
             if path:
                 log_success(_log, "Wrote %s", path)
     return 0
@@ -577,6 +602,22 @@ def _add_build_parser(sub: argparse._SubParsersAction) -> None:
         help="top screen bezel, any size (stretched to 400x240; transparent where the game shows)",
     )
     bezel.add_argument("--no-bezel", action="store_true", help="drop the loaded CIA's bezel")
+    alt = build.add_argument_group(
+        "alternate mode (RetroArch only, not psx): START or SELECT held at boot"
+    )
+    alt_choice = alt.add_mutually_exclusive_group()
+    alt_choice.add_argument(
+        "--alt-mode", action="store_true", help="show the game pixel perfect, without a bezel"
+    )
+    alt_choice.add_argument(
+        "--alt-bezel",
+        type=Path,
+        metavar="IMAGE",
+        help="... inside this bezel (stretched to 400x240)",
+    )
+    alt_choice.add_argument(
+        "--no-alt-mode", action="store_true", help="drop the loaded CIA's alternate mode"
+    )
 
     touch = build.add_argument_group("touch screen (Virtual Console style; font from the settings)")
     touch.add_argument(

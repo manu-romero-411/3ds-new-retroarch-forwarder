@@ -92,6 +92,7 @@ _MANIFEST_KEYS = ("content", "core", "console", "game")
 _MAX_TEXT_FILE_SIZE = 4096
 _MAX_EXEFS_FILE_SIZE = 8 * 1024 * 1024
 BEZEL_FILE = "bezel.png"
+ALT_BEZEL_FILE = "bezel_alt.png"
 CONFIG_FILE = "retroarch.cfg"
 CORE_OPTIONS_FILE = "game.opt"
 REMAP_FILE = "game.rmp"
@@ -109,6 +110,7 @@ class LoadedAssets:
     banner: Path | None
     audio: Path | None
     bezel: Path | None = None
+    alt_bezel: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -143,6 +145,9 @@ class LoadedGame:  # pylint: disable=too-many-instance-attributes
     banner_png: bytes | None = None
     audio_wav: bytes | None = None
     bezel_png: bytes | None = None
+    #: The alternate boot mode (START or SELECT held) and its bezel.
+    alt_mode: bool = False
+    alt_bezel_png: bytes | None = None
     screen: ScreenSettings | None = None
     core_options: dict[str, str] = field(default_factory=dict)
     remap: dict[str, str] = field(default_factory=dict)
@@ -188,6 +193,7 @@ class LoadedGame:  # pylint: disable=too-many-instance-attributes
             banner=_write_optional(directory / "loaded_banner.png", self.banner_png),
             audio=_write_optional(directory / "loaded_audio.wav", self.audio_wav),
             bezel=_write_optional(directory / "loaded_bezel.png", self.bezel_png),
+            alt_bezel=_write_optional(directory / "loaded_alt_bezel.png", self.alt_bezel_png),
         )
 
 
@@ -409,6 +415,14 @@ def _decode_assets(
     return short_name, long_name, manufacturer, icon_png, banner_png, audio_wav, warnings
 
 
+def _read_picture(handle: BinaryIO, files: dict[str, _RomFsFile], name: str) -> bytes | None:
+    """The RomFS picture ``name``, or ``None`` when missing or too large."""
+    entry = files.get(name)
+    if entry is None or entry.size > _MAX_BEZEL_SIZE:
+        return None
+    return _read_exact(handle, entry.offset, entry.size, name)
+
+
 def read_game_cia(path: Path) -> LoadedGame:
     """Load a game ``.cia`` from ``path``.
 
@@ -426,12 +440,8 @@ def read_game_cia(path: Path) -> LoadedGame:
             ncch = _parse_ncch(handle, ncch_offset)
             files = _romfs_root_files(handle, ncch)
             manifest = _read_manifest(handle, files)
-            bezel = files.get(BEZEL_FILE)
-            bezel_png = (
-                _read_exact(handle, bezel.offset, bezel.size, BEZEL_FILE)
-                if bezel is not None and bezel.size <= _MAX_BEZEL_SIZE
-                else None
-            )
+            bezel_png = _read_picture(handle, files, BEZEL_FILE)
+            alt_bezel_png = _read_picture(handle, files, ALT_BEZEL_FILE)
             config = _read_settings(handle, files, CONFIG_FILE)
             core_options = _read_settings(handle, files, CORE_OPTIONS_FILE)
             remap = parse_remap(_read_settings(handle, files, REMAP_FILE))
@@ -458,6 +468,8 @@ def read_game_cia(path: Path) -> LoadedGame:
         banner_png=banner_png,
         audio_wav=audio_wav,
         bezel_png=bezel_png,
+        alt_mode=manifest.get("alt_mode") == "true",
+        alt_bezel_png=alt_bezel_png,
         screen=ScreenSettings.from_config(config) if config else None,
         core_options=core_options,
         remap=remap,

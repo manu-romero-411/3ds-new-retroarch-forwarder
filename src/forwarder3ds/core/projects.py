@@ -9,6 +9,7 @@ Each project is a folder under :func:`projects_dir`::
     <id>/banner.png
     <id>/audio.<ext>
     <id>/bezel.png
+    <id>/alt_bezel.png     the alternate boot mode's bezel
 
 :class:`ProjectStore` lists, saves, deletes, exports (``.zip``) and imports
 them; :meth:`Project.request` turns one into a
@@ -51,6 +52,8 @@ class Asset(str, Enum):
     TAG_ICON = "tag_icon"
     #: The touch screen picture, when the project uses its own.
     BOTTOM_SCREEN = "bottom_screen"
+    #: The bezel of the alternate boot mode (START or SELECT held at boot).
+    ALT_BEZEL = "alt_bezel"
 
 
 class BannerStyle(str, Enum):
@@ -109,6 +112,9 @@ class Project:  # pylint: disable=too-many-instance-attributes
     bottom_screen: str = ""
     core_options: dict[str, str] = field(default_factory=dict)
     remap: dict[str, str] = field(default_factory=dict)
+    #: Holding START or SELECT at boot shows the game pixel perfect, inside
+    #: the :attr:`Asset.ALT_BEZEL` picture (RetroArch only).
+    alt_mode: bool = False
     #: The last CIA built from this project.
     output: str = ""
     modified: float = 0.0
@@ -172,6 +178,7 @@ class Project:  # pylint: disable=too-many-instance-attributes
             "bottom_screen": self.bottom_screen,
             "core_options": dict(self.core_options),
             "remap": dict(self.remap),
+            "alt_mode": self.alt_mode,
             "output": self.output,
             "modified": self.modified,
         }
@@ -222,6 +229,7 @@ class Project:  # pylint: disable=too-many-instance-attributes
             bottom_screen=text("bottom_screen"),
             core_options=strings("core_options"),
             remap=normalize_remap(strings("remap")),
+            alt_mode=bool(data.get("alt_mode", False)),
             output=text("output"),
             modified=float(modified) if isinstance(modified, (int, float)) else 0.0,
             directory=directory,

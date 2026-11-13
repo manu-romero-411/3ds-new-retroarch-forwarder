@@ -337,6 +337,7 @@ class MainWindow(QMainWindow):  # pylint: disable=too-many-instance-attributes
             output=str(path),
             core_options=dict(loaded.core_options),
             remap=dict(loaded.remap),
+            alt_mode=loaded.alt_mode,
         )
         if loaded.screen is not None:
             project.screen = loaded.screen
@@ -349,6 +350,7 @@ class MainWindow(QMainWindow):  # pylint: disable=too-many-instance-attributes
                 (Asset.BANNER, assets.banner),
                 (Asset.AUDIO, assets.audio),
                 (Asset.BEZEL, assets.bezel),
+                (Asset.ALT_BEZEL, assets.alt_bezel),
             ):
                 if source is not None:
                     store.set_asset(project, kind, source)

@@ -9,7 +9,8 @@ linked with one core and patched for single-game mode, see
   the CIA back), the seed ``retroarch.cfg`` (with the game's screen
   settings), the menu's colour theme, the touch screen asset and, optionally, a top screen bezel
   (``bezel.png`` + its overlay ``bezel.cfg``), initial core options
-  (``game.opt``) and a control remap (``game.rmp``);
+  (``game.opt``) and a control remap (``game.rmp``), and the alternate boot
+  mode's bezel (``bezel_alt.png`` + ``bezel_alt.cfg``, patch 0007);
 * an SMDH icon and a banner made by ``bannertool``;
 * a Title ID that is deterministic and collision-checked
   (:mod:`forwarder3ds.core.title_id`).
@@ -55,7 +56,7 @@ from forwarder3ds.core.archives import ArchiveError, extract, inner_name, is_arc
 from forwarder3ds.core.catalog import validate_platform_logo
 from forwarder3ds.core.core_options import options_file_text
 from forwarder3ds.core.cores import DEFAULT_CORES_JSON, CoreCatalogError, CoreRegistry
-from forwarder3ds.core.game_config import ScreenSettings, remap_text
+from forwarder3ds.core.game_config import ScreenSettings, remap_text, supports_alt_mode
 from forwarder3ds.core.logs import get_logger, log_success
 from forwarder3ds.core.names import save_folder_name
 from forwarder3ds.core.paths import bios_dir as user_bios_dir
@@ -105,6 +106,11 @@ BEZEL_OVERLAY = (
     "overlay0_full_screen = true\n"
     "overlay0_descs = 0\n"
 )
+#: The alternate boot mode (START or SELECT held, patch 0007): its bezel and
+#: overlay, read from the RomFS only.
+ALT_BEZEL_FILE = "bezel_alt.png"
+ALT_BEZEL_OVERLAY_FILE = "bezel_alt.cfg"
+ALT_BEZEL_OVERLAY = BEZEL_OVERLAY.replace(BEZEL_FILE, ALT_BEZEL_FILE)
 CORE_OPTIONS_FILE = "game.opt"
 REMAP_FILE = "game.rmp"
 #: makerom's BasicInfo Title is limited to 64 bytes.
@@ -149,6 +155,11 @@ class GameRequest:  # pylint: disable=too-many-instance-attributes
     #: A touch screen picture of the user's (any size, stretched to 320x240);
     #: wins over ``bottom_screen``.
     bottom_image: Path | None = None
+    #: Holding START or SELECT at boot shows the game pixel perfect inside
+    #: ``alt_bezel`` (RetroArch only, not on :data:`NO_ALT_MODE` consoles).
+    alt_mode: bool = False
+    #: The alternate boot mode's bezel (``None``: none).
+    alt_bezel: Path | None = None
     #: Keep the game out of the HOME menu's Activity Log.
     hide_from_activity_log: bool = False
     #: Set when rebuilding a CIA loaded from disk under its original Title
@@ -275,6 +286,7 @@ def validate_request(request: GameRequest, cores: CoreRegistry, systems: SystemC
         ("audio", request.audio),
         ("platform logo", request.platform_logo),
         ("bezel", request.bezel),
+        ("alternate bezel", request.alt_bezel),
     ):
         if path is not None and not path.is_file():
             raise BuildError(f"The {label} file does not exist: {path}")
@@ -323,6 +335,8 @@ def manifest_text(request: GameRequest) -> str:
         "game": request.folder,
         "rom_name": request.rom_name or request.rom.name,
     }
+    if request.alt_mode and supports_alt_mode(request.console):
+        entries["alt_mode"] = "true"
     lines = ["# Single-game CIA (retroarch/patches/0001-ctr-single-game-mode.patch)."]
     lines += [f"{key} = {_quote(value)}" for key, value in entries.items()]
     return "\n".join(lines) + "\n"
@@ -363,6 +377,8 @@ def write_romfs(directory: Path, request: GameRequest, base: Base) -> Path:
         _write_standalone_pictures(romfs, request, base)
         if request.core_options or request.remap:
             _log.info("%s has its own settings: controls and core options skipped", base.core)
+        if request.alt_mode:
+            _log.info("%s is not RetroArch: no alternate boot mode", base.core)
         return romfs
     (romfs / SEED_CONFIG_FILE).write_text(seed_config_text(request), encoding="utf-8")
     shutil.copyfile(bundled(MENU_THEME_FILE), romfs / MENU_THEME_FILE)
@@ -424,6 +440,13 @@ def _write_retroarch_pictures(romfs: Path, request: GameRequest, base: Base) -> 
     if request.bezel is not None:
         prepare_bezel(request.bezel, romfs / BEZEL_FILE)
         (romfs / BEZEL_OVERLAY_FILE).write_text(BEZEL_OVERLAY, encoding="utf-8")
+    if not request.alt_mode:
+        return
+    if not supports_alt_mode(request.console):
+        _log.info("No alternate boot mode for %s games", request.console)
+    elif request.alt_bezel is not None:
+        prepare_bezel(request.alt_bezel, romfs / ALT_BEZEL_FILE)
+        (romfs / ALT_BEZEL_OVERLAY_FILE).write_text(ALT_BEZEL_OVERLAY, encoding="utf-8")
 
 
 def _write_standalone_pictures(romfs: Path, request: GameRequest, base: Base) -> None:
@@ -668,4 +691,6 @@ def request_from_project(
         manual_unique_id=project.unique_id,
         replace_existing_id=project.unique_id is not None and project.unique_id == project.built_id,
         hide_from_activity_log=project.hide_from_activity_log,
+        alt_mode=project.alt_mode,
+        alt_bezel=project.asset(Asset.ALT_BEZEL),
     )
