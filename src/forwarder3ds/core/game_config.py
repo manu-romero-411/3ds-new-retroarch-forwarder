@@ -52,6 +52,17 @@ def supports_alt_mode(console: str) -> bool:
     return console not in NO_ALT_MODE
 
 
+def alt_mode_applies(console: str, screen: "ScreenSettings | None") -> bool:
+    """Whether the alternate boot mode makes sense for a game.
+
+    It shows the game pixel perfect: pointless when that is already its
+    screen mode (``None`` is the bases' default, which is not).
+    """
+    return supports_alt_mode(console) and (
+        screen is None or screen.mode is not ScreenMode.PIXEL_PERFECT
+    )
+
+
 class ScreenMode(str, Enum):
     """How the game's picture is scaled on the top screen."""
 

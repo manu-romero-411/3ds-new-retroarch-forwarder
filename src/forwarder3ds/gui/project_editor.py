@@ -51,7 +51,7 @@ from forwarder3ds.artwork.compositor import compose_banner_png_bytes
 from forwarder3ds.artwork.libretro import ThumbnailKind, fetch_thumbnail
 from forwarder3ds.artwork.steamgriddb import AssetKind
 from forwarder3ds.core.catalog import JINGLE_RULES, list_jingles, validate_jingle
-from forwarder3ds.core.game_config import ScreenMode, supports_alt_mode
+from forwarder3ds.core.game_config import ScreenMode, alt_mode_applies
 from forwarder3ds.core.logs import get_logger
 from forwarder3ds.core.names import database_title, save_folder_name, strip_tags, suggest_title
 from forwarder3ds.core.projects import Asset, BannerStyle, Project
@@ -751,7 +751,7 @@ class ProjectEditor(QScrollArea):  # pylint: disable=too-many-instance-attribute
             parts.append(self.tr("own touch screen"))
         if (
             project.alt_mode
-            and supports_alt_mode(project.console)
+            and alt_mode_applies(project.console, project.screen)
             and not self._context.is_standalone(project.core)
         ):
             parts.append(self.tr("alternate mode"))

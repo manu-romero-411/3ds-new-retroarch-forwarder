@@ -10,9 +10,10 @@ Like NSUI's *Injection method options*, with live previews of both screens:
   the emulator's own) and the top screen bezel. Both apply to every
   emulator: RetroArch draws the bezel over the game, a standalone emulator
   behind it.
-* **Alternate mode** (RetroArch only, not for the PlayStation): holding
-  START or SELECT while the game boots shows it pixel perfect inside a
-  bezel of its own, for that session only.
+* **Alternate mode** (RetroArch only, not for the PlayStation, and only
+  when the screen mode is not pixel perfect already): holding START or
+  SELECT while the game boots shows it pixel perfect inside a bezel of its
+  own, for that session only.
 * **RetroArch**: the button mapping and the initial core options.
 
 Everything here seeds the game's save folder the first time it boots; from
@@ -181,6 +182,7 @@ class InjectionOptionsDialog(QDialog):  # pylint: disable=too-many-instance-attr
 
         self._build_layout()
         self._update_custom()
+        self._update_alt()
         self._update_summaries()
         self._refresh_top()
         self._refresh_bottom()
@@ -248,7 +250,8 @@ class InjectionOptionsDialog(QDialog):  # pylint: disable=too-many-instance-attr
         self._smooth.toggled.connect(self._show_normal)
         self._bezel.edit.textChanged.connect(self._show_normal)
         self._alt_mode.toggled.connect(self._show_alt)
-        self._alt_mode.toggled.connect(self._alt_bezel.setEnabled)
+        self._alt_mode.toggled.connect(self._update_alt)
+        self._radios[ScreenMode.PIXEL_PERFECT].toggled.connect(self._update_alt)
         self._alt_bezel.edit.textChanged.connect(self._show_alt)
         self._touch.currentIndexChanged.connect(self._refresh_bottom)
         self._touch_image.edit.textChanged.connect(self._on_touch_image)
@@ -332,13 +335,13 @@ class InjectionOptionsDialog(QDialog):  # pylint: disable=too-many-instance-attr
             self.tr(
                 "Shows the game pixel perfect, without filtering, inside this picture "
                 "(a handheld's frame, say). Nothing is saved in that mode: the game's own "
-                "settings and bezel stay as they are."
+                "settings and bezel stay as they are. Only when the screen mode above is "
+                "not already pixel perfect."
             )
         )
         hint.setWordWrap(True)
         hint.setForegroundRole(QPalette.ColorRole.PlaceholderText)
         form.addRow("", hint)
-        self._alt_bezel.setEnabled(self._alt_mode.isChecked())
         if self._game.standalone:
             group.setEnabled(False)
             group.setToolTip(self.tr("RetroArch only."))
@@ -440,12 +443,23 @@ class InjectionOptionsDialog(QDialog):  # pylint: disable=too-many-instance-attr
             smooth=self._smooth.isChecked() and not self._game.standalone,
         )
 
+    def _update_alt(self) -> None:
+        """The alternate mode only when the game is not already pixel perfect."""
+        pixel_perfect = self._radios[ScreenMode.PIXEL_PERFECT].isChecked()
+        self._alt_mode.setEnabled(not pixel_perfect)
+        self._alt_bezel.setEnabled(not pixel_perfect and self._alt_mode.isChecked())
+        self._alt_mode.setToolTip(
+            self.tr("The game is already pixel perfect.") if pixel_perfect else ""
+        )
+        if pixel_perfect and self._preview_alt:
+            self._show_normal()
+
     def _show_normal(self) -> None:
         self._preview_alt = False
         self._refresh_top()
 
     def _show_alt(self) -> None:
-        self._preview_alt = self._alt_mode.isChecked()
+        self._preview_alt = self._alt_mode.isChecked() and self._alt_mode.isEnabled()
         self._refresh_top()
 
     def _refresh_top(self) -> None:

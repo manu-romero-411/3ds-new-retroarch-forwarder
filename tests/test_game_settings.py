@@ -25,6 +25,7 @@ from forwarder3ds.core.core_options import (
 from forwarder3ds.core.game_config import (
     ScreenMode,
     ScreenSettings,
+    alt_mode_applies,
     console_targets,
     parse_remap,
     remap_text,
@@ -369,3 +370,18 @@ def test_project_keeps_the_alternate_mode(tmp_path: Path) -> None:
     assert listed.asset(Asset.BEZEL) is None  # bezel.* does not match alt_bezel.png
     request = request_from_project(listed, tmp_path / "o.cia")
     assert request.alt_mode and request.alt_bezel == listed.asset(Asset.ALT_BEZEL)
+
+
+def test_no_alternate_mode_when_already_pixel_perfect(tmp_path: Path) -> None:
+    rom = tmp_path / "Tetris.gb"
+    rom.write_bytes(b"\0")
+    base = Base("gambatte", tmp_path / "x.elf", "64MB", "Legacy", False, None, {})
+    request = make_request(
+        rom=rom, long_name="Tetris", output=tmp_path / "t.cia", alt_mode=True,
+        screen=ScreenSettings(mode=ScreenMode.PIXEL_PERFECT),
+    )  # fmt: skip
+    romfs = write_romfs(tmp_path / "gb", request, base)
+    assert "alt_mode" not in (romfs / "manifest.cfg").read_text(encoding="utf-8")
+    assert alt_mode_applies("gb", None)
+    assert alt_mode_applies("gb", ScreenSettings(mode=ScreenMode.FULL))
+    assert not alt_mode_applies("psx", None)

@@ -56,7 +56,7 @@ from forwarder3ds.core.archives import ArchiveError, extract, inner_name, is_arc
 from forwarder3ds.core.catalog import validate_platform_logo
 from forwarder3ds.core.core_options import options_file_text
 from forwarder3ds.core.cores import DEFAULT_CORES_JSON, CoreCatalogError, CoreRegistry
-from forwarder3ds.core.game_config import ScreenSettings, remap_text, supports_alt_mode
+from forwarder3ds.core.game_config import ScreenSettings, alt_mode_applies, remap_text
 from forwarder3ds.core.logs import get_logger, log_success
 from forwarder3ds.core.names import save_folder_name
 from forwarder3ds.core.paths import bios_dir as user_bios_dir
@@ -335,7 +335,7 @@ def manifest_text(request: GameRequest) -> str:
         "game": request.folder,
         "rom_name": request.rom_name or request.rom.name,
     }
-    if request.alt_mode and supports_alt_mode(request.console):
+    if request.alt_mode and alt_mode_applies(request.console, request.screen):
         entries["alt_mode"] = "true"
     lines = ["# Single-game CIA (retroarch/patches/0001-ctr-single-game-mode.patch)."]
     lines += [f"{key} = {_quote(value)}" for key, value in entries.items()]
@@ -442,8 +442,8 @@ def _write_retroarch_pictures(romfs: Path, request: GameRequest, base: Base) -> 
         (romfs / BEZEL_OVERLAY_FILE).write_text(BEZEL_OVERLAY, encoding="utf-8")
     if not request.alt_mode:
         return
-    if not supports_alt_mode(request.console):
-        _log.info("No alternate boot mode for %s games", request.console)
+    if not alt_mode_applies(request.console, request.screen):
+        _log.info("No alternate boot mode: %s games, or already pixel perfect", request.console)
     elif request.alt_bezel is not None:
         prepare_bezel(request.alt_bezel, romfs / ALT_BEZEL_FILE)
         (romfs / ALT_BEZEL_OVERLAY_FILE).write_text(ALT_BEZEL_OVERLAY, encoding="utf-8")

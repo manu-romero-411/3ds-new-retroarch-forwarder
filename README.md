@@ -45,8 +45,8 @@ RetroArch installed and never touches `sdmc:/retroarch`.
 - An optional **bezel** over the top screen (`--bezel`, 400x240 with a
   transparent window: a 4:3 game is the middle 320x240), replaceable per
   game by dropping a `bezel.png` in its save folder.
-- An optional **alternate mode** (RetroArch only, not for the PlayStation):
-  holding START or SELECT while the game boots shows it pixel perfect,
+- An optional **alternate mode** (RetroArch only, not for the PlayStation,
+  and for games not already set to pixel perfect): holding START or SELECT while the game boots shows it pixel perfect,
   without filtering, inside a bezel of its own (a handheld's frame, say;
   `--alt-bezel`, or `--alt-mode` for none). Nothing is saved in that
   session, so the game's usual settings and bezel are never touched.

@@ -603,7 +603,8 @@ def _add_build_parser(sub: argparse._SubParsersAction) -> None:
     )
     bezel.add_argument("--no-bezel", action="store_true", help="drop the loaded CIA's bezel")
     alt = build.add_argument_group(
-        "alternate mode (RetroArch only, not psx): START or SELECT held at boot"
+        "alternate mode (RetroArch only, not psx, nor with --screen pixel_perfect): "
+        "START or SELECT held at boot"
     )
     alt_choice = alt.add_mutually_exclusive_group()
     alt_choice.add_argument(
