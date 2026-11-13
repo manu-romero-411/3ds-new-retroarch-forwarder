@@ -46,6 +46,9 @@ from forwarder3ds.gui.widgets.font_picker import FontPicker
 from forwarder3ds.gui.widgets.path_picker import PathPicker
 
 
+#: Room beside the page names in the settings list (pixels).
+_LIST_PADDING = 24
+
 class _Page(QWidget):
     """A settings page: copies values in and out of a :class:`Settings`."""
 
@@ -452,12 +455,16 @@ class SettingsDialog(QDialog):
         ]
 
         self._list = QListWidget()
-        self._list.setMaximumWidth(180)
+        self._list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._stack = QStackedWidget()
         for page_widget in self._pages:
             self._list.addItem(page_widget.title)
             self._stack.addWidget(page_widget)
             page_widget.load(self._settings)
+        # As wide as the longest page name (translations included), plus a margin.
+        self._list.setFixedWidth(
+            self._list.sizeHintForColumn(0) + 2 * self._list.frameWidth() + _LIST_PADDING
+        )
         self._list.currentRowChanged.connect(self._stack.setCurrentIndex)
         self._list.setCurrentRow(max(0, min(page, len(self._pages) - 1)))
 
