@@ -6,17 +6,24 @@ from __future__ import annotations
 
 from io import BytesIO
 
-from PIL import Image, ImageFont
+import pytest
+from PIL import Image, ImageChops, ImageFont
 
+from forwarder3ds.artwork import bottom_screen
 from forwarder3ds.artwork.bottom_screen import (
+    HOME_ICON_PNG,
+    HOME_ICON_PNG_SIZE,
+    HOME_ICON_SVG,
     LANGUAGE_NAMES,
     MESSAGES,
     BottomScreenStyle,
     house_icon,
     render_bottom_screen,
+    render_svg_alpha,
     render_bottom_screen_png,
     wrap,
 )
+from forwarder3ds.core.paths import bundled
 
 
 def test_every_language_has_a_name_and_a_menu_placeholder() -> None:
@@ -54,8 +61,31 @@ def test_wrap_keeps_words_and_latin_runs() -> None:
     assert any("snes9x" in line for line in japanese)
 
 
-def test_house_icon_has_a_window() -> None:
-    icon = house_icon(32, (255, 255, 255, 255))
+def _assert_house(icon: Image.Image) -> None:
     alpha = icon.getchannel("A")
-    assert alpha.getpixel((16, 21)) < 64  # the window
+    assert alpha.getpixel((16, 22)) < 64  # the window
     assert alpha.getpixel((16, 10)) > 192  # the roof
+    assert icon.getpixel((16, 10))[:3] == (255, 255, 255)  # in the colour asked
+
+
+def test_house_icon_is_the_svg() -> None:
+    pytest.importorskip("PySide6.QtSvg")
+    bottom_screen._home_icon_alpha.cache_clear()  # pylint: disable=protected-access
+    _assert_house(house_icon(32, (255, 255, 255, 255)))
+
+
+def test_house_icon_without_qt(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(bottom_screen, "render_svg_alpha", lambda path, size: None)
+    bottom_screen._home_icon_alpha.cache_clear()  # pylint: disable=protected-access
+    _assert_house(house_icon(32, (255, 255, 255, 255)))
+    bottom_screen._home_icon_alpha.cache_clear()  # pylint: disable=protected-access
+
+
+def test_home_icon_png_matches_the_svg() -> None:
+    """Run scripts/render_home_icon.py after editing home_icon.svg."""
+    pytest.importorskip("PySide6.QtSvg")
+    svg = render_svg_alpha(bundled(HOME_ICON_SVG), HOME_ICON_PNG_SIZE)
+    assert svg is not None
+    with Image.open(bundled(HOME_ICON_PNG)) as png:
+        difference = ImageChops.difference(svg, png.convert("RGBA").getchannel("A"))
+    assert difference.getextrema()[1] <= 8, "home_icon.png is stale"
