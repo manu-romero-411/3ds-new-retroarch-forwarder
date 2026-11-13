@@ -123,6 +123,25 @@ install_core_system() {
     done
 }
 
+# Renames, all through the static library LIB, the global symbols it defines
+# that start with one of the space-separated PREFIXES, adding PREFIX: a core's
+# own copy of a libretro-common file (blueMSX's rxml.c) would otherwise clash
+# with RetroArch's when linked together.
+rename_core_symbols() {
+    local lib="$1" prefixes="$2" prefix="$3" pattern map
+    [[ -n "${prefixes}" ]] || return 0
+    pattern="^($(tr ' ' '|' <<< "${prefixes}"))"
+    map="$(mktemp)"
+    "${DEVKITARM}/bin/arm-none-eabi-nm" -g --defined-only "${lib}" 2> /dev/null \
+        | awk 'NF == 3 { print $3 }' | grep -E "${pattern}" | sort -u \
+        | awk -v p="${prefix}" '{ print $1, p $1 }' > "${map}" || true
+    if [[ -s "${map}" ]]; then
+        log "[INFO]" "Renaming $(wc -l < "${map}") symbols of $(basename "${lib}")"
+        "${DEVKITARM}/bin/arm-none-eabi-objcopy" --redefine-syms="${map}" "${lib}"
+    fi
+    rm -f "${map}"
+}
+
 # Checks out a single file of a big repository (blobless partial clone).
 fetch_file() {
     local repo="$1" ref="$2" path="$3" dir="$4"
@@ -161,6 +180,7 @@ build_core() {
     local work="$1" recipe="$2" out_dir="$3" ra_dir="$1/RetroArch"
     local CORE_NAME CORE_REPO CORE_REF CORE_SUBDIR CORE_MAKEFILE CORE_LIB CORE_CFLAGS=""
     local CORE_OPTIONS="" CORE_MAKE_ARGS="" CORE_SYSTEM_ROOT="" CORE_SYSTEM_PATHS=""
+    local CORE_RENAME_SYMBOLS=""
     # shellcheck source=retroarch/cores/gambatte.env
     source "${recipe}"
     local core_dir="${work}/cores/${CORE_NAME}" dest="${out_dir}/bases/${CORE_NAME}"
@@ -180,6 +200,7 @@ build_core() {
         make -C "${core_dir}/${CORE_SUBDIR}" -f "${CORE_MAKEFILE}" platform=ctr \
         "${make_args[@]}" -j"${jobs}" > /dev/null
     install -m 0644 "${core_dir}/${CORE_SUBDIR}/${CORE_LIB}" "${ra_dir}/libretro_ctr.a"
+    rename_core_symbols "${ra_dir}/libretro_ctr.a" "${CORE_RENAME_SYMBOLS}" "${CORE_NAME}_"
 
     log "[INFO]" "Linking RetroArch ${RETROARCH_REF} with ${CORE_NAME}"
     rm -f "${ra_dir}/retroarch_3ds.elf"
