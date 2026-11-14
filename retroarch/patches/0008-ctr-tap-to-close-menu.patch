@@ -1,0 +1,22 @@
+ctr: a tap on the black touch screen closes the menu
+
+While the menu is open without bottom_menu.png (CTR_BOTTOM_MENU_BLANK,
+patch 0005), tapping the touch screen closes it and resumes the game, the
+same way a tap in game opens it.
+
+--- a/gfx/drivers/ctr_gfx.c
++++ b/gfx/drivers/ctr_gfx.c
+@@ -1226,8 +1226,12 @@
+       switch (ctr->bottom_menu)
+       {
+          case CTR_BOTTOM_MENU_NOT_AVAILABLE:
+-         case CTR_BOTTOM_MENU_BLANK:
+             return;
++         case CTR_BOTTOM_MENU_BLANK:
++            /* The menu is open over a black touch screen: a tap closes it
++             * and resumes the game, as a tap in game opens it. */
++            BIT64_SET(lifecycle_state, RARCH_MENU_TOGGLE);
++            break;
+          case CTR_BOTTOM_MENU_DEFAULT:
+             BIT64_SET(lifecycle_state, RARCH_MENU_TOGGLE);
+             break;

@@ -60,6 +60,9 @@ Written against the RetroArch release in `RETROARCH_REF`; bump both together.
   perfect (square pixels, integer scale, no filtering) inside
   `romfs:/bezel_alt.png`, or no bezel. The configuration is not saved on
   exit in that session, so the game's settings and bezel stay as they were.
+- `0008-ctr-tap-to-close-menu.patch`: while the menu is open over the black
+  touch screen (0005), a tap on it closes the menu and resumes the game, as a
+  tap in game opens it.
 
 ## Core recipes
 
